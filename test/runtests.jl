@@ -1,6 +1,6 @@
 using covid19abm
 using Test
 
-@testset "covid19abm.jl" begin
-    # Write your own tests here.
+@testset "demographics" begin
+    initialize()
 end
