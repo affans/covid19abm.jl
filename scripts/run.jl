@@ -1,7 +1,4 @@
 using Distributed
-using Random
-using DelimitedFiles
-using Distributions
 using Base.Filesystem
 using DataFrames
 using CSV
@@ -21,13 +18,15 @@ addprocs(SlurmManager(512), N=16)
 @everywhere using ProgressMeter
 
 function run(beta) 
+    myp = ModelParameters()
+    myp.β = beta
+    @everywhere reset_params($myp)
+ 
     nsims = 1000
-    p = cv.ModelParameters()
-    
+      
     cd = pmap(1:nsims) do x 
-        vals = main(x, p)        
+        vals = main(x)        
     end    
-
     for i = 1:nsims
         dts = cd[i]
         insertcols!(dts, 1, :sim => i)    
@@ -43,20 +42,24 @@ function run(beta)
     return dd
 end
 
-
 function calibrate(beta)
-    p = cv.ModelParameters()
-    p.β = beta 
-    p.calibration = true
+    myp = ModelParameters()
+    myp.β = beta
+    myp.h = 0 
+    myp.f = 0
+    myp.calibration = true
+    @everywhere reset_params($myp)
+    
     nsims = 1000
     vals = zeros(Int64, nsims)
-    println("calibrating with beta: $(p.β)")
-    for i = 1:nsims
-        a = main(i, p)
-        vals[i] = a.lat[end] - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
+    println("calibrating with beta: $(cv.p.β)")
+    cd = pmap(1:nsims) do i 
+        a = main(i)
+        val = a.lat[end] - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
+        return val
     end
-    println("mean R0: $(mean(vals)) with std: $(std(vals))")
-    return vals
+    println("mean R0: $(mean(cd)) with std: $(std(cd))")
+    return cd
 end
 
 function calibrate_robustness(beta)

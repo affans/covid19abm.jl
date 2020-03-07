@@ -46,14 +46,14 @@ const agebraks = @SVector [0:19, 20:49, 50:64, 65:99]
 
 export ModelParameters, HEALTH, Human, humans
 
-function main(sim, ip::ModelParameters)
+function main(sim)
     #Random.seed!(sim*726)
-    p = ip
-    println("simid: $sim on processor: $(myid()), with beta: $(p.β)") 
+    modeltime = 500 #maxtime
+
     ## datacollection 
     _names = Symbol.(["sus", "lat", "inf", "iso", "infiso", "hos", "icu", "ded", "rec"])
     #prev = DataFrame([Int64 for i = 1:length(_names)], _names, maxtime) 
-    dat = DataFrame([zeros(Int64, maxtime) for i = 1:length(_names)], _names) 
+    dat = DataFrame([zeros(Int64, modeltime) for i = 1:length(_names)], _names) 
     initialize() # initialize population
     e = insert_exposed()
 
@@ -62,9 +62,10 @@ function main(sim, ip::ModelParameters)
         move_to_infected(humans[e[1]])
         swapupdate = time_update_cal
     end
+    dump(p)
     #println("swapupdate func: $(swapupdate)")
     #_modelstate() 
-    for st = 1:maxtime
+    for st = 1:modeltime
         # start of day
         collect_data(st, dat)
         dyntrans()
@@ -75,6 +76,16 @@ function main(sim, ip::ModelParameters)
     return dat
 end
 export main
+
+function reset_params(ip::ModelParameters)
+    # the p is a global const
+    # the ip is an incoming DIFFERENT instance of parameters 
+    # copy the values. 
+    for x in propertynames(p)
+        setfield!(p, x, getfield(ip, x))
+    end
+end
+export reset_params
 
 function _modelstate() 
     ## prints a string with model data
@@ -281,23 +292,24 @@ function dyntrans()
     tomeet = map(1:4) do grp
         findall(x -> x.iso == false && x.ag == grp , humans)    
     end
-    
     #length(tomeet) <= 5 && return totalinf
     for xid in infs
         x = humans[xid]
         ag = x.ag   
         cnt = rand(nbs[ag])  ## get number of contacts/day
-        cnt >= length(tomeet[ag]) && return totalinf
-
+        cnt >= length(tomeet[ag]) && error("error here")
+        
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 
-        # going from cnt_meet to the gpw array might remove a contact or two due to rounding. 
+        # going from cnt to the gpw array might remove a contact or two due to rounding. 
         gpw = Int.(round.(cm[ag]*cnt)) 
+        #println("cnt: $cnt, gpw: $gpw")
         # let's stratify the human population in it's age groups. 
         # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
         # enumerate over the 15 groups and randomly select contacts from each group
         for (i, g) in enumerate(gpw)
             meet = rand(tomeet[i], g)    # sample 'g' number of people from this group 
+            #println("... meeting grp: $g, meet: $meet")
             for j in meet
                 y = humans[j]
                 if y.health == SUS && rand() < p.β
