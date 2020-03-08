@@ -21,24 +21,40 @@ function run(beta)
     myp = ModelParameters()
     myp.β = beta
     @everywhere reset_params($myp)
- 
-    nsims = 1000
-      
+    nsims = 1000      
     cd = pmap(1:nsims) do x 
         vals = main(x)        
     end    
     for i = 1:nsims
         dts = cd[i]
         insertcols!(dts, 1, :sim => i)    
-        insertcols!(dts, 1, :time => 1:500)
+        insertcols!(dts, 1, :time => 1:myp.modeltime)
     end
 
     d = vcat([cd[i] for i = 1:length(cd)]...)
     ## create yearly average
     dd = d |> @groupby(_.time) |>
         @map({time=key(_), cnt=length(_),
-              sus=mean(_.sus), lat=mean(_.lat), inf=mean(_.inf), iso=mean(_.iso), infiso=mean(_.infiso), 
-              hos=mean(_.hos), icu=mean(_.icu), ded=mean(_.ded), rec=mean(_.rec)}) |> DataFrame
+              sus=mean(_.sus), 
+              lat=mean(_.lat), 
+              mild=mean(_.mild), 
+              miso=mean(_.miso), 
+              inf=mean(_.inf), 
+              iiso=mean(_.iiso), 
+              hos=mean(_.hos), 
+              icu=mean(_.icu), 
+              rec=mean(_.rec), 
+              ded=mean(_.ded), 
+              lat_inc=mean(_.lat_inc), 
+              mild_inc=mean(_.mild_inc), 
+              miso_inc=mean(_.miso_inc), 
+              inf_inc=mean(_.inf_inc),
+              iiso_inc=mean(_.iiso_inc),
+              hos_inc=mean(_.hos_inc),
+              icu_inc=mean(_.icu_inc),
+              rec_inc=mean(_.rec_inc),
+              ded_inc=mean(_.rec_inc)
+              }) |> DataFrame
     return dd
 end
 
