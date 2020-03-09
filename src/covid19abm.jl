@@ -17,11 +17,11 @@ end
 
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0 
-    r = 0.0 ## reduction factor for mild cases
+    r = 0.5 ## reduction factor for mild cases
     I₀::Int64 = 1 ## initial infected
     prov::Symbol = :ontario 
     #σ::Distribution = LogNormal(log(5.2), 0.1)  ## distribution for incubation period
-    σ::Int64 = 6
+    σ::Int64 = 6   ## incubation period
     θ::Float64 = 0.8 ## proportion of people going to mild
     γ::Int64 = 5 ## 5 days infectious period for non hospitalized
     δ::Int64 = 4 ## 4 days infectious period for those going to hospital
@@ -31,14 +31,38 @@ end
     f::Float64 = 0.05  ## percent of people practice self-isolation
     psiC::Int64 = 13   ## days to recover from ICU
     psiH::Int64 = 10   ## days to recover from hospitalization
-    muC::Int64 = 0     ## days to death from hospital (if death happening)
+    muC::Int64 = 0     ## days to death from icu (if death happening)
     muH::Int64 = 0     ## days to death from hospital (if death happening)
     mh::Float64 = 0.0  ## probability of death in hospital
-    mc::Float64 = 0.0  ## probability of death in hospital
+    mc::Float64 = 0.0  ## probability of death in icu
     ## internal parameters
     calibration::Bool = false 
     modeltime::Int64 = 500
 end
+
+function reset_params(ip::ModelParameters)
+    # the p is a global const
+    # the ip is an incoming DIFFERENT instance of parameters 
+    # copy the values. 
+    for x in propertynames(p)
+        setfield!(p, x, getfield(ip, x))
+    end
+end
+export reset_params
+
+# sigma:  1/(rand(LogNormal(log(5.2), 0.1)))     
+# θ::NTuple{4, Float64} = (0.8, 0.8, 0.4, 0.2)
+# δ Uniform 2 to 5. 
+# tau, f: input
+# fmild: input  
+# fsevere 0.80
+# psiH = gamma 4.5 2.75, truncate 8 and 17 (rand(Uniform(0.013, 0.015)), rand(Uniform(0.04, 0.044)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.10, 0.20)))
+# psiC = gamma 4.5 2.75 + 2 days
+# muH = gamma 5.3 2.1  truncate 9 and 15
+# muC = gamma 5.3, 2.1 - two days
+# c = same as ode model  
+# h = ... age dependent?
+
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
@@ -51,14 +75,15 @@ export ModelParameters, HEALTH, Human, humans
 
 function main(sim)
     #Random.seed!(sim*726)
-    ## datacollection     
-    #_names_prev = Symbol.(["sus", "lat", "mild", "miso", "inf", "iiso", "hos", "icu", "ded", "rec"])    
-    _names_inci = Symbol.(["lat_inc", "mild_inc", "miso_inc", "inf_inc", "iiso_inc", "hos_inc", "icu_inc", "rec_inc", "ded_inc"])    
-    _names_prev = Symbol.(["sus", "lat", "mild", "miso", "inf", "iiso", "hos", "icu", "rec", "ded"])
-    _names = vcat(_names_inci, _names_prev)
-    datf = DataFrame([zeros(Int64, p.modeltime) for i = 1:length(_names)], _names) 
-    # matrix for incidence collection instead of a dataframe
-  
+    
+    ## datacollection            
+    #_names_inci = Symbol.(["lat_inc", "mild_inc", "miso_inc", "inf_inc", "iiso_inc", "hos_inc", "icu_inc", "rec_inc", "ded_inc"])    
+    #_names_prev = Symbol.(["sus", "lat", "mild", "miso", "inf", "iiso", "hos", "icu", "rec", "ded"])
+    #_names = vcat(_names_inci, _names_prev)
+    #datf = DataFrame([zeros(Int64, p.modeltime) for i = 1:length(_names)], _names) 
+    # matrix to collect entire state model instead of a dataframe 
+    pic = zeros(Int64, 10000, p.modeltime)
+
     initialize() # initialize population
     e = insert_exposed()
 
@@ -67,33 +92,33 @@ function main(sim)
         move_to_inf(humans[e[1]])
         swapupdate = time_update_cal
     end
-    dump(p)
-    #println("swapupdate func: $(swapupdate)")
-    #_modelstate() 
+
     for st = 1:p.modeltime
         # start of day
         totalinf = dyntrans()
         sw = swapupdate()                
         pr = _modelstate()
         # end of day
-        datf[st, :] .= vcat(sw..., pr...)
+        #datf[st, :] .= vcat(sw..., pr...)
+        _modelstate(st, pic)
     end
     #_modelstate() 
-    return datf
+    return pic
 end
 export main
 
-function reset_params(ip::ModelParameters)
-    # the p is a global const
-    # the ip is an incoming DIFFERENT instance of parameters 
-    # copy the values. 
-    for x in propertynames(p)
-        setfield!(p, x, getfield(ip, x))
-    end
-end
-export reset_params
 
-function _modelstate()       
+
+
+## Data Collection/ Model State functions
+function _modelstate(st, pic)
+    for i=1:length(humans)
+        pic[i, st] = Int(humans[i].health)
+    end    
+end
+export _modelstate
+
+function _modelprev()       
     sus = length(findall(x -> x.health == SUS, humans))
     lat = length(findall(x -> x.health == LAT, humans))
     mild = length(findall(x -> x.health == MILD, humans))
@@ -106,7 +131,7 @@ function _modelstate()
     ded = length(findall(x -> x.health == DED, humans))
     return (sus, lat, mild, miso, inf, iiso, hos, icu, rec, ded)
 end
-export _modelstate
+export _modelprev
 
 
 ## initialization functions 
@@ -266,7 +291,7 @@ function move_to_hospicu(h::Human)
     h.swap = UNDEF
     h.tis = 0
     h.iso = true  ## hospitalized patients are isolated by default.
-    
+
     if swaphealth == HOS 
         if rand() < p.mh ## person will die in the hospital 
             h.exp = p.muH 
