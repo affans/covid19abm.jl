@@ -20,23 +20,9 @@ end
     r = 0.5 ## reduction factor for mild cases
     I₀::Int64 = 1 ## initial infected
     prov::Symbol = :ontario 
-    #σ::Distribution = LogNormal(log(5.2), 0.1)  ## distribution for incubation period
-    σ::Int64 = 6   ## incubation period
-    θ::Float64 = 0.8 ## proportion of people going to mild
-    γ::Int64 = 5 ## 5 days infectious period for non hospitalized
-    δ::Int64 = 4 ## 4 days infectious period for those going to hospital
     τ::Int64 = 1 ## days before they self-isolate 
-    h::Float64 = 0.025 ## proporiton requiring hospital
-    c::Float64 = 0.07  ## proporiton requiring ICU
     fmild::Float64 = 0.05  ## percent of people practice self-isolation
     fsevere::Float64 = 0.80 # fixed at 0.80
-    psiC::Int64 = 13   ## days to recover from ICU
-    psiH::Int64 = 10   ## days to recover from hospitalization
-    muC::Int64 = 0     ## days to death from icu (if death happening)
-    muH::Int64 = 0     ## days to death from hospital (if death happening)
-    mh::Float64 = 0.0  ## probability of death in hospital
-    mc::Float64 = 0.0  ## probability of death in icu
-    ## internal parameters
     calibration::Bool = false 
     modeltime::Int64 = 500
 end
@@ -50,19 +36,6 @@ function reset_params(ip::ModelParameters)
     end
 end
 export reset_params
-
-# sigma:  1/(rand(LogNormal(log(5.2), 0.1)))     
-# θ::NTuple{4, Float64} = (0.8, 0.8, 0.4, 0.2)
-# δ Uniform 2 to 5. 
-# tau, f: input
-# fmild: input  
-# fsevere 0.80
-# psiH = gamma 4.5 2.75, truncate 8 and 17 (rand(Uniform(0.013, 0.015)), rand(Uniform(0.04, 0.044)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.10, 0.20)))
-# psiC = gamma 4.5 2.75 + 2 days
-# muH = gamma 5.3 2.1  truncate 9 and 15
-# muC = gamma 5.3, 2.1 - two days
-# c = same as ode model  
-# h = ... age dependent?
 
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -264,73 +237,97 @@ function time_update_cal()
     end
     return (a, 0, 0, 0, 0, 0, 0, 0, 0) ## needs to return the same length tuple as time_update    
 end
-export time_update, time_update_cal, move_to_latent, move_to_hospicu, move_to_infected, move_to_recovered, move_to_dead
+export time_update, time_update_cal
 
-function move_to_latent(h::Human)
-    ## human h is now in incubation period.
-    h.health = LAT
-    ## check whether person will INF or MILD after
-    h.swap = rand() < p.θ ? MILD : INF    
-    h.tis = 0    ## reset time in state 
-    h.exp = p.σ    
-    h.iso = false # starting at latent, person is not isolated from the community   
-    h.icu = false # reset the icu so it dosn't pop up as a bug later.
+function move_to_latent(x::Human)
+    ## transfers human h to the incubation period and samples the duration
+    σ = LogNormal(log(5.2), 0.1) # duration of incubation period 
+    θ = (0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
+    x.health = LAT
+    x.swap = rand() < θ[x.ag] ? MILD : INF  # check whether person will INF or MILD after
+    x.tis = 0   # reset time in state 
+    x.exp = Int(round(rand(σ)))
+    x.iso = false # starting at latent, person is not isolated from the community   
+    x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
+export move_to_latent
 
-function move_to_mild(h::Human)
-    h.health = MILD     
-    h.tis = 0 
-    h.exp = p.γ
-    h.swap = REC 
-    h.iso = false
+function move_to_mild(x::Human)
+    ## transfers human h to the mild infection stage for γ days
+    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
+    x.health = MILD     
+    x.tis = 0 
+    x.exp = γ
+    x.swap = REC 
+    x.iso = false
     if rand() < p.fmild
-        h.exp = p.τ
-        h.swap = MISO   
+        x.swap = MISO  
+        x.exp = p.τ 
     end
 end
+export move_to_mild
 
-function move_to_miso(h::Human)
-    h.health = MISO
-    h.swap = REC
-    h.tis = 0 
-    h.exp = p.γ ##p.γ - p.τ  ## since tau amount of days was already spent as infectious 
-    ## but who cares.. self-isolated people will eventually recover and have no input in dynamics.
-    h.iso = true  ## self isolated from the community
+function move_to_miso(x::Human)
+    ## transfers human h to the mild isolated infection stage for γ days
+    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
+    x.health = MISO
+    x.swap = REC
+    x.tis = 0 
+    x.exp = γ # p.γ - p.τ  ## since tau amount of days was already spent as infectious but it dosn't really matter
+    x.iso = true  ## self isolated from the community
 end
+export move_to_miso
 
-function move_to_inf(h::Human)
-    ## human h is now in infectious period.
+function move_to_inf(x::Human)
+    ## transfers human h to the mild isolated infection stage for γ days
     ## for swap, check if person will be hospitalized, selfiso, or recover
-    h.health = INF
-    h.swap = UNDEF
-    h.tis = 0    ## reset time in state 
-    h.iso = false ## person is not isolated while infectious. 
-    if rand() < p.h     ## going to hospital or ICU but will spend time transmissing the disease 
-        h.exp = p.δ            
-        h.swap = rand() < p.c ? ICU : HOS        
-    else ## no hospital for this lucky individual ... will be transmitting to others. 
-        h.exp = p.γ
-        h.swap = REC
+
+    h = 0.8  # probability of going to hospital... should be high since this is already severe class
+    c = 0.025 # probability of going to ICU GIVEN HOSPITAL!!
+    δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
+    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
+
+    x.health = INF
+    x.swap = UNDEF
+    x.tis = 0 
+    x.iso = false # person is not isolated while infectious. 
+    if rand() < h     # going to hospital or ICU but will spend delta time transmissing the disease with full contacts 
+        x.exp = δ     
+        x.swap = rand() < c ? ICU : HOS        
+    else ## no hospital for this lucky (but severe) individual 
+        x.exp = γ  # as in the other functions.  
+        x.swap = REC
         if rand() < p.fsevere    
-            h.exp = p.τ      
-            h.swap = IISO
+            x.exp = p.τ      
+            x.swap = IISO
         end
     end
     ## before returning, check if swap is set 
-    h.swap == UNDEF && error("agent I -> ?")
+    x.swap == UNDEF && error("agent I -> ?")
 end
 
-function move_to_iiso(h::Human)
-    ## human h is now in self-isolation period.
-    h.health = IISO 
-    h.swap = REC
-    h.iso = true  ## self isolated
-    h.tis = 0     ## reset time in state 
-    h.exp = p.γ ##p.γ - p.τ  ## since tau amount of days was already spent as infectious 
+function move_to_iiso(x::Human)
+    ## transfers human h to the sever isolated infection stage for γ days
+    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
+    x.health = IISO 
+    x.swap = REC
+    x.iso = true  ## self isolated
+    x.tis = 0     ## reset time in state 
+    x.exp = γ ##p.γ - p.τ  ## since tau amount of days was already spent as infectious 
     ## but who cares.. self-isolated people will eventually recover and have no input in dynamics. 
 end 
 
-function move_to_hospicu(h::Human)    
+function move_to_hospicu(h::Human)   
+    
+    ## to do: don't sample from distribution unless needed
+    ## to do: check whether the parameters seyed gave are for mean/std or shape/scale
+    mh = 0.0 # probability of death in hospital
+    mc = 0.0 # probability of death in ICU
+    psiH = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17))))
+    psiC = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17)))) + 2
+    muH = Int(round(rand(truncated(Gamma(5.3, 2.1), 9, 15))))
+    muC = Int(round(rand(truncated(Gamma(5.3, 2.1), 9, 15)))) + 2
+
     swaphealth = h.swap 
     h.health = swaphealth ## swap either to HOS or ICU
     h.swap = UNDEF
@@ -338,21 +335,21 @@ function move_to_hospicu(h::Human)
     h.iso = true  ## hospitalized patients are isolated by default.
 
     if swaphealth == HOS 
-        if rand() < p.mh ## person will die in the hospital 
-            h.exp = p.muH 
+        if rand() < mh ## person will die in the hospital 
+            h.exp = muH 
             h.swap = DED
         else 
-            h.exp = p.psiH 
+            h.exp = psiH 
             h.swap = REC
         end        
     end
 
     if swaphealth == ICU         
-        if rand() < p.mc ## person will die in the ICU 
-            h.exp = p.muC
+        if rand() < mc ## person will die in the ICU 
+            h.exp = muC
             h.swap = DED
         else 
-            h.exp = p.psiC
+            h.exp = psiC
             h.swap = REC
         end
     end 
