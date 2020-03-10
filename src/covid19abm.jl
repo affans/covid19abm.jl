@@ -28,7 +28,8 @@ end
     τ::Int64 = 1 ## days before they self-isolate 
     h::Float64 = 0.025 ## proporiton requiring hospital
     c::Float64 = 0.07  ## proporiton requiring ICU
-    f::Float64 = 0.05  ## percent of people practice self-isolation
+    fmild::Float64 = 0.05  ## percent of people practice self-isolation
+    fsevere::Float64 = 0.80 # fixed at 0.80
     psiC::Int64 = 13   ## days to recover from ICU
     psiH::Int64 = 10   ## days to recover from hospitalization
     muC::Int64 = 0     ## days to death from icu (if death happening)
@@ -96,19 +97,14 @@ function main(sim)
     for st = 1:p.modeltime
         # start of day
         totalinf = dyntrans()
-        sw = swapupdate()                
-        pr = _modelstate()
-        # end of day
-        #datf[st, :] .= vcat(sw..., pr...)
+        sw = swapupdate()
         _modelstate(st, pic)
+        # end of day
     end
     #_modelstate() 
     return pic
 end
 export main
-
-
-
 
 ## Data Collection/ Model State functions
 function _modelstate(st, pic)
@@ -133,6 +129,55 @@ function _modelprev()
 end
 export _modelprev
 
+function _collectdf(hmatrix)
+    ## takes the output of the humans x time matrix and processes it into a dataframe
+    #_names_inci = Symbol.(["lat_inc", "mild_inc", "miso_inc", "inf_inc", "iiso_inc", "hos_inc", "icu_inc", "rec_inc", "ded_inc"])    
+    #_names_prev = Symbol.(["sus", "lat", "mild", "miso", "inf", "iiso", "hos", "icu", "rec", "ded"])
+    mdf_inc, mdf_prev = _get_incidence_and_prev(hmatrix)
+    mdf = hcat(mdf_inc, mdf_prev)    
+    _names_inc = Symbol.(string.((Symbol.(instances(HEALTH)[1:end - 1])), "_INC"))
+    _names_prev = Symbol.(string.((Symbol.(instances(HEALTH)[1:end - 1])), "_PREV"))
+    _names = vcat(_names_inc..., _names_prev...)
+    datf = DataFrame(mdf, _names)
+    return datf
+end
+
+function _get_incidence_and_prev(hmatrix)
+    cols = instances(HEALTH)[1:end - 1] ## don't care about the UNDEF health status
+    inc = zeros(Int64, p.modeltime, length(cols))
+    pre = zeros(Int64, p.modeltime, length(cols))
+    for i = 1:length(cols)
+        inc[:, i] = _get_column_incidence(hmatrix, cols[i])
+        pre[:, i] = _get_column_prevalence(hmatrix, cols[i])
+    end
+    return inc, pre
+end
+
+function _get_column_incidence(hmatrix, hcol)
+    inth = Int(hcol)
+    timevec = zeros(Int64, p.modeltime)
+    for r in eachrow(hmatrix)
+        idx = findfirst(x -> x == inth, r)
+        if idx !== nothing 
+            timevec[idx] += 1
+        end
+    end
+    return timevec
+end
+
+function _get_column_prevalence(hmatrix, hcol)
+    inth = Int(hcol)
+    timevec = zeros(Int64, p.modeltime)
+    for (i, c) in enumerate(eachcol(hmatrix))
+        idx = findall(x -> x == inth, c)
+        if idx !== nothing
+            ps = length(c[idx])    
+            timevec[i] = ps    
+        end
+    end
+    return timevec
+end
+export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence
 
 ## initialization functions 
 function get_province_ag(prov) 
@@ -238,7 +283,7 @@ function move_to_mild(h::Human)
     h.exp = p.γ
     h.swap = REC 
     h.iso = false
-    if rand() < p.f 
+    if rand() < p.fmild
         h.exp = p.τ
         h.swap = MISO   
     end
@@ -266,7 +311,7 @@ function move_to_inf(h::Human)
     else ## no hospital for this lucky individual ... will be transmitting to others. 
         h.exp = p.γ
         h.swap = REC
-        if rand() < p.f      
+        if rand() < p.fsevere    
             h.exp = p.τ      
             h.swap = IISO
         end
