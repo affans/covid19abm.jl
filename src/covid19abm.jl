@@ -56,10 +56,11 @@ function main(sim)
     #_names = vcat(_names_inci, _names_prev)
     #datf = DataFrame([zeros(Int64, p.modeltime) for i = 1:length(_names)], _names) 
     # matrix to collect entire state model instead of a dataframe 
-    pic = zeros(Int64, 10000, p.modeltime)
+    hmatrix = zeros(Int64, 10000, p.modeltime)
 
     initialize() # initialize population
-    e = insert_exposed()
+    ags = [x.ag for x in humans] # store a vector of the age group distribution 
+    e = insert_exposed() 
 
     swapupdate = time_update
     if p.calibration 
@@ -71,23 +72,24 @@ function main(sim)
         # start of day
         totalinf = dyntrans()
         sw = swapupdate()
-        _modelstate(st, pic)
+        _get_model_state(st, hmatrix)
         # end of day
     end
-    #_modelstate() 
-    return pic
+    return hmatrix, ags ## return the model state as well as the age groups. 
 end
 export main
 
 ## Data Collection/ Model State functions
-function _modelstate(st, pic)
+function _get_model_state(st, hmatrix)
     for i=1:length(humans)
-        pic[i, st] = Int(humans[i].health)
+        hmatrix[i, st] = Int(humans[i].health)
     end    
 end
-export _modelstate
+export _get_model_state
 
-function _modelprev()       
+function _modelprev()  
+    ## quickly get model prevalence statistics. 
+    ## recommended to use _get_incidence_and_prev instead.
     sus = length(findall(x -> x.health == SUS, humans))
     lat = length(findall(x -> x.health == LAT, humans))
     mild = length(findall(x -> x.health == MILD, humans))
@@ -114,6 +116,18 @@ function _collectdf(hmatrix)
     datf = DataFrame(mdf, _names)
     return datf
 end
+
+function _splitstate(hmatrix, ags)
+    #split the full hmatrix into 4 age groups based on ags (the array of age group of each agent)
+    #sizes = [length(findall(x -> x == i, ags)) for i = 1:4]
+    matx = []#Array{Array{Int64, 2}, 1}(undef, 4)
+    for i = 1:4
+        idx = findall(x -> x == i, ags)
+        push!(matx, view(hmatrix, idx, :))
+    end
+    return matx
+end
+export _splitstate
 
 function _get_incidence_and_prev(hmatrix)
     cols = instances(HEALTH)[1:end - 1] ## don't care about the UNDEF health status
