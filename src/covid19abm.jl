@@ -284,10 +284,11 @@ export move_to_mild
 function move_to_miso(x::Human)
     ## transfers human h to the mild isolated infection stage for γ days
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
+    τ = x.exp  ## tau amount of days spent in isolation as infectious already.
     x.health = MISO
     x.swap = REC
     x.tis = 0 
-    x.exp = γ # p.γ - p.τ  ## since tau amount of days was already spent as infectious but it dosn't really matter
+    x.exp = γ - τ  ## since tau amount of days was already spent as infectious but it dosn't really matter
     x.iso = true  ## self isolated from the community
 end
 export move_to_miso
@@ -296,8 +297,10 @@ function move_to_inf(x::Human)
     ## transfers human h to the mild isolated infection stage for γ days
     ## for swap, check if person will be hospitalized, selfiso, or recover
 
-    h = 0.8  # probability of going to hospital... should be high since this is already severe class
-    c = 0.025 # probability of going to ICU GIVEN HOSPITAL!!
+    # h = prob of hospital, c = prob of icu AFTER hospital
+    h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
+    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
+     
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
 
@@ -305,9 +308,9 @@ function move_to_inf(x::Human)
     x.swap = UNDEF
     x.tis = 0 
     x.iso = false # person is not isolated while infectious. 
-    if rand() < h     # going to hospital or ICU but will spend delta time transmissing the disease with full contacts 
+    if rand() < h[x.ag]     # going to hospital or ICU but will spend delta time transmissing the disease with full contacts 
         x.exp = δ     
-        x.swap = rand() < c ? ICU : HOS        
+        x.swap = rand() < c[x.ag] ? ICU : HOS        
     else ## no hospital for this lucky (but severe) individual 
         x.exp = γ  # as in the other functions.  
         x.swap = REC
@@ -323,52 +326,53 @@ end
 function move_to_iiso(x::Human)
     ## transfers human h to the sever isolated infection stage for γ days
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
+    τ = x.exp
     x.health = IISO 
     x.swap = REC
     x.iso = true  ## self isolated
     x.tis = 0     ## reset time in state 
-    x.exp = γ ##p.γ - p.τ  ## since tau amount of days was already spent as infectious 
-    ## but who cares.. self-isolated people will eventually recover and have no input in dynamics. 
+    x.exp = γ - τ  ## since tau amount of days was already spent as infectious 
 end 
 
-function move_to_hospicu(h::Human)   
+function move_to_hospicu(x::Human)   
     
     ## to do: don't sample from distribution unless needed
     ## to do: check whether the parameters seyed gave are for mean/std or shape/scale
-    mh = 0.0 # probability of death in hospital
-    mc = 0.0 # probability of death in ICU
+    mh = [0.001, 0.00135, 0.01225, 0.04]
+    mc = [0.002, 0.0027, 0.0245, 0.08] 
+
     psiH = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17))))
     psiC = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17)))) + 2
     muH = Int(round(rand(truncated(Gamma(5.3, 2.1), 9, 15))))
     muC = Int(round(rand(truncated(Gamma(5.3, 2.1), 9, 15)))) + 2
 
-    swaphealth = h.swap 
-    h.health = swaphealth ## swap either to HOS or ICU
-    h.swap = UNDEF
-    h.tis = 0
-    h.iso = true  ## hospitalized patients are isolated by default.
+    swaphealth = x.swap 
+    x.health = swaphealth ## swap either to HOS or ICU
+    x.swap = UNDEF
+    x.tis = 0
+    x.iso = true  ## hospitalized patients are isolated by default.
 
     if swaphealth == HOS 
-        if rand() < mh ## person will die in the hospital 
-            h.exp = muH 
-            h.swap = DED
+        if rand() < mh[x.ag] ## person will die in the hospital 
+            x.exp = muH 
+            x.swap = DED
         else 
-            h.exp = psiH 
-            h.swap = REC
+            x.exp = psiH 
+            x.swap = REC
         end        
     end
 
     if swaphealth == ICU         
-        if rand() < mc ## person will die in the ICU 
-            h.exp = muC
-            h.swap = DED
+        if rand() < mc[x.ag] ## person will die in the ICU 
+            x.exp = muC
+            x.swap = DED
         else 
-            h.exp = psiC
-            h.swap = REC
+            x.exp = psiC
+            x.swap = REC
         end
     end 
     ## before returning, check if swap is set 
-    h.swap == UNDEF && error("agent H -> ?")    
+    x.swap == UNDEF && error("agent H -> ?")    
 end
 
 function move_to_dead(h::Human)
