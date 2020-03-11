@@ -17,8 +17,7 @@ end
 
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0 
-    r = 0.5 ## reduction factor for mild cases
-    I₀::Int64 = 1 ## initial infected
+    r = 0.5 ## reduction factor for mild cases    
     prov::Symbol = :ontario 
     τ::Int64 = 1 ## days before they self-isolate 
     fmild::Float64 = 0.05  ## percent of people practice self-isolation
@@ -60,13 +59,20 @@ function main(sim)
 
     initialize() # initialize population
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
-    e = insert_exposed() 
 
     swapupdate = time_update
     if p.calibration 
+        e = insert_exposed(1, rand(1:4))  ## insert a latent person in random age group. 
         move_to_inf(humans[e[1]])
         swapupdate = time_update_cal
+    else
+        ## else insert 4 latent people, one in each age group. 
+        e = insert_exposed(1, 1) 
+        e = insert_exposed(1, 1) 
+        e = insert_exposed(1, 1) 
+        e = insert_exposed(1, 1)     
     end
+
 
     for st = 1:p.modeltime
         # start of day
@@ -201,10 +207,9 @@ function initialize()
 end
 export initialize
 
-insert_exposed() = insert_exposed(p.I₀)
-function insert_exposed(num) 
+function insert_exposed(num, ag) 
     ## inserts a number of infected people in the population randomly
-    l = findall(x -> x.health == SUS, humans)
+    l = findall(x -> x.health == SUS && x.ag == ag, humans)
     if length(l) > 0 && num < length(l)
         h = sample(l, num; replace = false)
         @inbounds for i in h 
