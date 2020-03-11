@@ -5,18 +5,19 @@ using CSV
 using Query
 using Statistics
 using UnicodePlots
+using ClusterManagers
 using covid19abm
 const cv=covid19abm
 
-addprocs(4, exeflags="--project=.")
-@everywhere using covid19abm
+#addprocs(30, exeflags="--project=.")
+#@everywhere using covid19abm
 
-function run(beta) 
-    myp = cv.ModelParameters()
-    myp.β = beta
+function run(myp::ModelParameters, folderprefix="./")
     @everywhere reset_params($myp)
-    nsims = 4     
+    nsims = 500    
     println("starting $nsims simulations...")
+    println("save folder set to $(pwd())...")
+    println("running with parameters...")
     dump(myp)
     # will return 5 dataframes. 1 total, 4 age-specific 
     cd = pmap(1:nsims) do x         
@@ -36,6 +37,8 @@ function run(beta)
             insertcols!(dt, 1, :time => 1:myp.modeltime)
          end         
     end
+    println("simulations finished")
+    println("total size of simulations: $(Base.summarysize(cd))")
 
     ## stack the sims together
     all = vcat([cd[i].a  for i = 1:nsims]...)
@@ -46,24 +49,23 @@ function run(beta)
     mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4)
 
     ## save at the simulation and time level
-    c1 = Symbol.((:SUS, :LAT, :MILD, :MISO, :INF, :IISO, :HOS, :ICU), :_INC)
-    c2 = Symbol.((:SUS, :LAT, :MILD, :MISO, :INF, :IISO, :HOS, :ICU), :_PREV)
+    c1 = Symbol.((:SUS, :LAT, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
+    c2 = Symbol.((:SUS, :LAT, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
         for c in vcat(c1..., c2...)
             udf = unstack(df, :time, :sim, c) 
-            #fn = (lowercase(string("simlevel_", c, "_", k, "_.dat")))
-            #CSV.write(fn, udf)
+            fn = (lowercase(string("$(folderprefix)/simlevel_", c, "_", k, ".dat")))
+            CSV.write(fn, udf)
         end
         println("saving dataframe time level: $k")
         # time level, save file per age group
         yaf = compute_yearly_average(df)
-        fn = string("timelevel_", k, ".dat")
-        println("typeof: $(typeof(yaf))")
+        fn = string("$(folderprefix)/timelevel_", k, ".dat")        
         CSV.write(fn, yaf)
     end
-    return cd
+    return mydfs
 end
 
 function compute_yearly_average(df)
@@ -92,13 +94,57 @@ function compute_yearly_average(df)
     return ya
 end
 
+function run_scenarios()
+    myp = covid19abm.ModelParameters()
+    start = time()
+
+    betas = [0.038]
+    prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
+    fs = (0.05, 0.1, 0.2)
+    τs = (1, 2)      
+    ts = length(betas) * length(fs) * length(τs) 
+    #pr = Progress(ts, dt=1, barglyphs=BarGlyphs("[=> ]"), barlen=50, color=:yellow)
+    for p in prov, r in betas
+        myp.β = r
+        myp.prov = p
+        
+        ## run with no isolation
+        myp.τ = 0 
+        myp.fmild = 0 
+        @everywhere reset_params($myp)
+        prefix = savestr(myp)
+        run(myp, prefix)
+        
+        ## run with isolation 
+        for f in fs, τ in τs    
+            myp.τ  = τ
+            myp.fmild = f
+            @everywhere reset_params($myp)
+            prefix = savestr(myp)
+            run(myp, prefix)
+        end
+    end  
+    elapsed = time() - start
+    println("done, time: $elapsed")
+end
+
+function savestr(p::ModelParameters)
+    ## setup folder name based on model parameters
+    taustr = replace(string(p.τ), "." => "")
+    fstr = replace(string(p.fmild), "." => "")
+    rstr = replace(string(p.β), "." => "")
+    prov = replace(string(p.prov), "." => "")
+    fldrname = "./simresults/$prov/b$rstr/tau$(taustr)_f$(fstr)/"
+    mkpath(fldrname)
+end
+
 function calibrate(beta)
     myp = ModelParameters()
     myp.β = beta
     myp.calibration = true
     @everywhere reset_params($myp)
     
-    nsims = 16
+    nsims = 30
     vals = zeros(Int64, nsims)
     println("calibrating with beta: $(cv.p.β)")
     cd = pmap(1:nsims) do i 
@@ -128,19 +174,30 @@ function calibrate_robustness(beta)
 end
 
 
+# function hmatrix_analysis()
+#     ## function takes the output of the model 
+#     ## and splits it into an array of 2d matrices for plotting purposes. 
+#     myp = cv.ModelParameters()
+#     myp.β = 0.038
+#     reset_params($myp)
+#     cd, ags = main(1)
 
+#     #mats = Array{Int64, 3}(undef, 500) 
+#     mats = Array{Int64, 3}(undef, 100,100,500)
+#     for i = 1:500
+#         col = cd[:, i]
+#         mats[:, :, i] = reshape(col, (100, 100))
+#     end
 
-function split_model(pic)
-    ## function takes the output of the model 
-    ## and splits it into an array of 2d matrices for plotting purposes. 
-    # go through each column
-    mats = Array{Array{Int64, 2}, 1}(undef, 500) 
-    for i = 1:500
-        col = pic[:, i]
-        mats[i] = reshape(col, (100, 100))
-    end
-    return mats
-end
+#     colorarray = IndirectArray(mats, [colorant"green", colorant"teal", colorant"blue", colorant"azure", 
+#     colorant"red", colorant"lightsalmon", colorant"magenta", colorant"magenta", colorant"grey60", colorant"black"])
+#     save("myanimation.gif", colorarray; fps=5)
+
+#     idxarray = rand(1:3, 100, 100, 50);
+#     colorarray = IndirectArray(idxarray, [colorant"red", colorant"purple", colorant"indigo"])
+
+#     return mats
+# end
 
 # function makeheatmaps(bufs)
 #     heatmaps = map(bufs) do buf
