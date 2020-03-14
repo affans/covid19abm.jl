@@ -6,21 +6,28 @@ using Query
 using Statistics
 using UnicodePlots
 using ClusterManagers
+using Dates
+
+## load the packages by covid19abm
+using Parameters, Distributions, StatsBase, StaticArrays, Random, Match, DataFrames
 using covid19abm
 const cv=covid19abm
 
 #addprocs(30, exeflags="--project=.")
 #@everywhere using covid19abm
 
+addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.")
+@everywhere using covid19abm
+
 function run(myp::ModelParameters, folderprefix="./")
-    @everywhere reset_params($myp)
-    nsims = 500    
+    nsims = 1000      ## robustness function gives us stable point r0 for 1000 sims
     println("starting $nsims simulations...")
     println("save folder set to $(pwd())...")
     println("running with parameters...")
     dump(myp)
     # will return 5 dataframes. 1 total, 4 age-specific 
     cd = pmap(1:nsims) do x         
+        reset_params(myp)  ## reset parameters for each simulation. 
         hmatrix, ags = main(x)        
         all = _collectdf(hmatrix)
         spl = _splitstate(hmatrix, ags)
@@ -49,8 +56,9 @@ function run(myp::ModelParameters, folderprefix="./")
     mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4)
 
     ## save at the simulation and time level
-    c1 = Symbol.((:SUS, :LAT, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
-    c2 = Symbol.((:SUS, :LAT, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
+    ## to ignore for now: miso, iiso, mild, ded
+    c1 = Symbol.((:LAT, :INF, :HOS, :ICU, :DED), :_INC)
+    c2 = Symbol.((:LAT, :INF, :HOS, :ICU, :DED), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
@@ -97,8 +105,7 @@ end
 function run_scenarios()
     myp = covid19abm.ModelParameters()
     start = time()
-
-    betas = [0.038]
+    betas = [0.035] 
     prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
     fs = (0.05, 0.1, 0.2)
     τs = (1, 2)      
@@ -106,20 +113,17 @@ function run_scenarios()
     #pr = Progress(ts, dt=1, barglyphs=BarGlyphs("[=> ]"), barlen=50, color=:yellow)
     for p in prov, r in betas
         myp.β = r
-        myp.prov = p
-        
+        myp.prov = p        
         ## run with no isolation
-        myp.τ = 0 
         myp.fmild = 0 
-        @everywhere reset_params($myp)
+        myp.τmild = 0                 
         prefix = savestr(myp)
         run(myp, prefix)
         
         ## run with isolation 
         for f in fs, τ in τs    
-            myp.τ  = τ
-            myp.fmild = f
-            @everywhere reset_params($myp)
+            myp.τmild  = τ
+            myp.fmild = f            
             prefix = savestr(myp)
             run(myp, prefix)
         end
@@ -129,51 +133,65 @@ function run_scenarios()
 end
 
 function savestr(p::ModelParameters)
+    datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
-    taustr = replace(string(p.τ), "." => "")
+    taustr = replace(string(p.τmild), "." => "")
     fstr = replace(string(p.fmild), "." => "")
     rstr = replace(string(p.β), "." => "")
     prov = replace(string(p.prov), "." => "")
-    fldrname = "./simresults/$prov/b$rstr/tau$(taustr)_f$(fstr)/"
+    fldrname = "/data/covid19abm/simresults/$prov/b$rstr/tau$(taustr)_f$(fstr)/"
     mkpath(fldrname)
 end
 
-function calibrate(beta)
+function calibrate(beta, nsims, prov=:ontario)
     myp = ModelParameters()
     myp.β = beta
+    myp.prov = prov
     myp.calibration = true
-    @everywhere reset_params($myp)
-    
-    nsims = 30
     vals = zeros(Int64, nsims)
-    println("calibrating with beta: $(cv.p.β)")
+    println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
     cd = pmap(1:nsims) do i 
+        reset_params(myp)  
         h, ags = main(i) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
         val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
         return val
     end
     println("mean R0: $(mean(cd)) with std: $(std(cd))")
-    return cd
+    return mean(cd)
 end
 
-function calibrate_robustness(beta)
-    #once a beta is found based on nsims simulations, 
+function calibrate_robustness(beta, prov=:ontario)
+    #[:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
+    # once a beta is found based on nsims simulations, 
     # see how robust it is. run calibration with same beta 100 times 
     # to see the variation in R0 produced. 
-    # means = zeros(Float64, 100)
-    # for i = 1:100 
-    #     vals = calibrate(beta)
-    #     means[i] = mean(vals)
-    # end
-    cd = pmap(1:100) do x 
-        vals = calibrate(beta)
-        return mean(vals)
+    nsims = [500, 1000, 2000]
+    reps = 5
+    means = zeros(Float64, reps, length(nsims))
+    for (i, ns) in enumerate(nsims)
+        cd = map(1:reps) do x 
+            println("iter: $x, sims: $ns")
+            mval = calibrate(beta, ns, prov)         
+            return mval
+        end
+        means[:, i] = cd
     end
-    return cd
+    # for i in 2:nworkers()
+    #     ## mf defined as: @everywhere mg() = covid19abm.p.β     
+    #     rpr = remotecall_fetch(mf,  i+1).prov
+    #     rpr != prov && error("province didn't get set in the remote workers")
+    # end
+    return means
 end
+#provs = []
+#for x in [:ontario, :alberta, :bc, :manitoba, :newbruns]
+#    m = calibrate_robustness(0.101, x)
+#    push!(provs, m)
+#end
 
-
+#@everywhere mg() = covid19abm.p.β    
+#@everywhere mf(b) = covid19abm.p.β = b
 # function hmatrix_analysis()
 #     ## function takes the output of the model 
 #     ## and splits it into an array of 2d matrices for plotting purposes. 
