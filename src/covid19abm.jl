@@ -300,13 +300,9 @@ function move_to_inf(x::Human)
     ## for swap, check if person will be hospitalized, selfiso, or recover
 
     # h = prob of hospital, c = prob of icu AFTER hospital
-    if p.calibration 
-        h = (0, 0, 0, 0)
-        c = (0, 0, 0, 0)
-    else 
-        h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
-        c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
-    end
+    h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
+    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
+
      
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers

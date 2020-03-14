@@ -144,6 +144,7 @@ function savestr(p::ModelParameters)
 end
 
 function calibrate(beta, nsims, prov=:ontario)
+    println("did you remember to turn off hospitalization/icu for the initial infected case? Check move_to_inf()")
     myp = ModelParameters()
     myp.β = beta
     myp.prov = prov
