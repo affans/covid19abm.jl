@@ -15,15 +15,15 @@ Base.@kwdef mutable struct Human
     icu::Bool = false ## is going to be in icu?
 end
 
+## default system parameters
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
-    β = 0.0 
-    r = 0.5 ## reduction factor for mild cases    
+    β = 0.0       
     prov::Symbol = :ontario 
     τmild::Int64 = 1 ## days before they self-isolate 
     fmild::Float64 = 0.05  ## percent of people practice self-isolation
     fsevere::Float64 = 0.80 # fixed at 0.80
     calibration::Bool = false 
-    modeltime::Int64 = 500
+    modeltime::Int64 = 500    
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -31,36 +31,33 @@ Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 ## constants 
 const HSIZE = 10000
 const humans = Array{Human}(undef, HSIZE) # run 100,000
-const p = ModelParameters()
+const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:19, 20:49, 50:64, 65:99]
 
 export ModelParameters, HEALTH, Human, humans
 
-function main(sim)
+function main(ip::ModelParameters)
     #Random.seed!(sim*726)
     ## datacollection            
-    #_names_inci = Symbol.(["lat_inc", "mild_inc", "miso_inc", "inf_inc", "iiso_inc", "hos_inc", "icu_inc", "rec_inc", "ded_inc"])    
-    #_names_prev = Symbol.(["sus", "lat", "mild", "miso", "inf", "iiso", "hos", "icu", "rec", "ded"])
-    #_names = vcat(_names_inci, _names_prev)
-    #datf = DataFrame([zeros(Int64, p.modeltime) for i = 1:length(_names)], _names) 
-    # matrix to collect entire state model instead of a dataframe 
+    # matrix to collect model state for every time step
     hmatrix = zeros(Int64, HSIZE, p.modeltime)
     initialize() # initialize population
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
-    swapupdate = time_update
+    
+    # reset the parameters for the simulation scenario
+    reset_params(ip)
+
+    # insert initial infected agents into the model
+    # and setup the right swap function. 
     if p.calibration 
-        e = insert_exposed(1, 3)  ## insert a latent person in random age group.        
-        move_to_inf(humans[e[1]])
-        p.fsevere = 0.0  ## no isolation for the initial infected case for calibration
         swapupdate = time_update_cal
-    else
-        # todo, age group 3
-        ## else insert 4 latent people, one in each age group. 
-        e = insert_exposed(1, 1) 
-        e = insert_exposed(1, 2) 
-        e = insert_exposed(1, 3) 
-        e = insert_exposed(1, 4)     
-    end
+        insert_infected(1, 3)  ## function will never isolation nor put in hospital/icu 
+    else 
+        swapupdate = time_update
+        insert_infected(5, 3)  
+    end    
+    
+    # start the time loop
     for st = 1:p.modeltime
         # start of day
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
@@ -74,8 +71,8 @@ export main
 
 function reset_params(ip::ModelParameters)
     # the p is a global const
-    # the ip is an incoming DIFFERENT instance of parameters 
-    # copy the values. 
+    # the ip is an incoming different instance of parameters 
+    # copy the values from ip to p. 
     for x in propertynames(p)
         setfield!(p, x, getfield(ip, x))
     end
@@ -204,18 +201,24 @@ function initialize()
 end
 export initialize
 
-function insert_exposed(num, ag) 
+function insert_infected(num, ag) 
     ## inserts a number of infected people in the population randomly
+    ## this function should resemble move_to_inf()
     l = findall(x -> x.health == SUS && x.ag == ag, humans)
     if length(l) > 0 && num < length(l)
         h = sample(l, num; replace = false)
         @inbounds for i in h 
-            move_to_latent(humans[i])            
+            x = humans[i]
+            x.health = INF
+            x.swap = REC
+            x.tis = 0 
+            x.iso = false 
+            x.exp = 5  ## change if needed.            
         end
     end    
     return h
 end
-export insert_exposed
+export insert_infected
 
 function time_update()
     # counters to calculate incidence
@@ -298,11 +301,11 @@ export move_to_miso
 function move_to_inf(x::Human)
     ## transfers human h to the mild isolated infection stage for γ days
     ## for swap, check if person will be hospitalized, selfiso, or recover
+    ## if changing this function, also check if insert_infected needs to be changed. 
 
-    # h = prob of hospital, c = prob of icu AFTER hospital
+    # h = prob of hospital, c = prob of icu AFTER hospital    
     h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
     c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
-
      
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
@@ -430,7 +433,7 @@ function dyntrans()
                 y = humans[j]
                 bf = p.β
                 if (x.health == MILD || x.health == MISO)
-                    bf = bf * (1 - p.r)
+                    bf = bf * (1 - 0.5)  ## reduction factor 0.5
                 end
                 if y.health == SUS && rand() < bf
                     totalinf += 1
@@ -452,6 +455,16 @@ function contact_matrix()
     CM[4]=[0.1290, 0.4071, 0.2193, 0.2446]
     return CM
 end
+
+# function contact_matrix() 
+## regular contacts, just with 5 age groups. 
+# 0-4, 5-19, 20-49, 50-64, 65+
+#     0.2287    0.1839    0.4219    0.1116    0.0539
+#     0.0276    0.5964    0.2878    0.0591    0.0291
+#     0.0376    0.1454    0.6253    0.1423    0.0494
+#     0.0242    0.1094    0.4867    0.2723    0.1074
+#     0.0207    0.1083    0.4071    0.2193    0.2446
+# end
 
 function negative_binomials() 
     ## the means/sd here are calculated using _calc_avgag

@@ -19,16 +19,15 @@ const cv=covid19abm
 addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.")
 @everywhere using covid19abm
 
-function run(myp::ModelParameters, folderprefix="./")
-    nsims = 1000      ## robustness function gives us stable point r0 for 1000 sims
+function run(myp::ModelParameters, nsims=500, folderprefix="./")
     println("starting $nsims simulations...")
-    println("save folder set to $(pwd())...")
+    println("save folder set to $(folderprefix)...")
     println("running with parameters...")
     dump(myp)
+
     # will return 5 dataframes. 1 total, 4 age-specific 
-    cd = pmap(1:nsims) do x         
-        reset_params(myp)  ## reset parameters for each simulation. 
-        hmatrix, ags = main(x)        
+    cd = pmap(1:nsims) do x                 
+        hmatrix, ags = main(myp)        
         all = _collectdf(hmatrix)
         spl = _splitstate(hmatrix, ags)
         ag1 = _collectdf(spl[1])
@@ -37,6 +36,8 @@ function run(myp::ModelParameters, folderprefix="./")
         ag4 = _collectdf(spl[4])
         return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4)
     end    
+
+    # add the simulation/time column for index purposes.
     for i = 1:nsims
          dts = cd[i]
          for dt in dts 
@@ -45,7 +46,7 @@ function run(myp::ModelParameters, folderprefix="./")
          end         
     end
     println("simulations finished")
-    println("total size of simulations: $(Base.summarysize(cd))")
+    println("total size of simulation dataframes: $(Base.summarysize(cd))")
 
     ## stack the sims together
     all = vcat([cd[i].a  for i = 1:nsims]...)
@@ -105,12 +106,13 @@ end
 function run_scenarios()
     myp = covid19abm.ModelParameters()
     start = time()
-    betas = [0.035] 
+    betas=[0.0365, 0.0455]
     prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
-    fs = (0.05, 0.1, 0.2)
+    fs = (0.10, 0.20, 0.40)
     τs = (1, 2)      
     ts = length(betas) * length(fs) * length(τs) 
-    #pr = Progress(ts, dt=1, barglyphs=BarGlyphs("[=> ]"), barlen=50, color=:yellow)
+    nsims = 500
+    
     for p in prov, r in betas
         myp.β = r
         myp.prov = p        
@@ -118,14 +120,14 @@ function run_scenarios()
         myp.fmild = 0 
         myp.τmild = 0                 
         prefix = savestr(myp)
-        run(myp, prefix)
+        run(myp, 500, prefix)
         
         ## run with isolation 
         for f in fs, τ in τs    
             myp.τmild  = τ
             myp.fmild = f            
             prefix = savestr(myp)
-            run(myp, prefix)
+            run(myp, 500, prefix)
         end
     end  
     elapsed = time() - start
@@ -144,7 +146,6 @@ function savestr(p::ModelParameters)
 end
 
 function calibrate(beta, nsims, prov=:ontario)
-    println("did you remember to turn off hospitalization/icu for the initial infected case? Check move_to_inf()")
     myp = ModelParameters()
     myp.β = beta
     myp.prov = prov
@@ -152,8 +153,7 @@ function calibrate(beta, nsims, prov=:ontario)
     vals = zeros(Int64, nsims)
     println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
     cd = pmap(1:nsims) do i 
-        reset_params(myp)  
-        h, ags = main(i) ## gets the entire model. 
+        h, ags = main(myp) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
         val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
         return val
