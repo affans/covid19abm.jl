@@ -20,12 +20,10 @@ addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.
 @everywhere using covid19abm
 
 function run(myp::ModelParameters, nsims=500, folderprefix="./")
-    println("starting $nsims simulations...")
-    println("save folder set to $(folderprefix)...")
-    println("running with parameters...")
+    println("starting $nsims simulations...\nsave folder set to $(folderprefix)")
     dump(myp)
-
-    # will return 5 dataframes. 1 total, 4 age-specific 
+    myp.calibration && error("can not run simulation, calibration is on.")
+    # will return 6 dataframes. 1 total, 4 age-specific 
     cd = pmap(1:nsims) do x                 
         hmatrix, ags = main(myp)        
         all = _collectdf(hmatrix)
@@ -34,7 +32,8 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
         ag2 = _collectdf(spl[2])
         ag3 = _collectdf(spl[3])
         ag4 = _collectdf(spl[4])
-        return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4)
+        ag5 = _collectdf(spl[5])
+        return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5)
     end    
 
     # add the simulation/time column for index purposes.
@@ -54,7 +53,8 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     ag2 = vcat([cd[i].g2 for i = 1:nsims]...)
     ag3 = vcat([cd[i].g3 for i = 1:nsims]...)
     ag4 = vcat([cd[i].g4 for i = 1:nsims]...)
-    mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4)
+    ag5 = vcat([cd[i].g5 for i = 1:nsims]...)
+    mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
 
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild, ded
@@ -103,13 +103,76 @@ function compute_yearly_average(df)
     return ya
 end
 
+function run_ny_scenario()
+    myp = covid19abm.ModelParameters()
+    nsims = 500
+    start = time()
+    
+    myp.β = 0.0485 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
+    myp.fsevere = 0 
+    _calibrate(0.0485, 1000, myp)
+    myp.prov = :newyork 
+
+    ## scenario 1: no isolation, no quarantine of individuals
+    myp.fsevere = 0
+    myp.fmild = 0 
+    myp.τmild = 0  
+    myp.eldq = 0    
+    prefix = savestr(myp)
+    println("$prefix")
+    run(myp, 500, prefix)
+    
+    ## scenario 2: 50% self-isolation, no quarantine of individuals
+    myp.fsevere = 0.50
+    myp.fmild = 0.50 
+    myp.τmild = 1
+    myp.eldq = 0  
+    prefix = savestr(myp)
+    println("$prefix")
+    run(myp, 500, prefix)
+
+    ## scenario 3: 50% self-isolation, + 90% of 60+ quarantine. 
+    myp.fsevere = 0.50
+    myp.fmild = 0.50 
+    myp.τmild = 1
+    myp.eldq = 0.90         
+    prefix = savestr(myp)
+    println("$prefix")
+    run(myp, 500, prefix)
+
+    ## scenario 4: 50% self-isolation, + 90% of 60+ quarantine. 
+    myp.fsevere = 0.0
+    myp.fmild = 0.0 
+    myp.τmild = 0
+    myp.eldq = 0.90         
+    prefix = savestr(myp)
+    println("$prefix")
+    run(myp, 500, prefix)
+
+    # fs = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
+    # for f in fs 
+    #     myp.τmild  = 1
+    #     myp.fmild = f
+    #     myp.fsevere = f       
+    #     _calibrate(0.0485, 5000, myp)         
+    #     myp.calibration = false
+    #     prefix = savestr(myp)
+    #     run(myp, 500, prefix)
+    # end
+    println("done newyork")
+end
+
 function run_scenarios()
     myp = covid19abm.ModelParameters()
     start = time()
-    betas=[0.0365, 0.0455]
-    prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
-    fs = (0.10, 0.20, 0.40)
-    τs = (1, 2)      
+    #betas=[0.0365, 0.0455]
+    #prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
+    betas = [0.0485]
+    prov = [:newyork]
+    #fs = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
+    #τs = (1, 2)
+    fs = (0.80)
+    τs = (1)      
     ts = length(betas) * length(fs) * length(τs) 
     nsims = 500
     
@@ -117,6 +180,7 @@ function run_scenarios()
         myp.β = r
         myp.prov = p        
         ## run with no isolation
+        myp.fsevere = 0
         myp.fmild = 0 
         myp.τmild = 0                 
         prefix = savestr(myp)
@@ -134,6 +198,7 @@ function run_scenarios()
     println("done, time: $elapsed")
 end
 
+
 function savestr(p::ModelParameters)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
@@ -141,8 +206,59 @@ function savestr(p::ModelParameters)
     fstr = replace(string(p.fmild), "." => "")
     rstr = replace(string(p.β), "." => "")
     prov = replace(string(p.prov), "." => "")
-    fldrname = "/data/covid19abm/simresults/$prov/b$rstr/tau$(taustr)_f$(fstr)/"
+    eldr = replace(string(p.eldq), "." => "")
+    fldrname = "/data/covid19abm/simresults/$prov/b$rstr/tau$(taustr)_f$(fstr)_q$(eldr)/"
     mkpath(fldrname)
+end
+
+function findr0(beta, fval, nsims, prov=:ontario)
+    myp = ModelParameters()
+    myp.β = beta
+    myp.prov = prov
+    myp.fsevere = fval 
+    myp.calibration = true
+    vals = zeros(Int64, nsims)
+    println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
+    cd = pmap(1:nsims) do i 
+        h, ags = main(myp) ## gets the entire model. 
+        val = sum(_get_column_incidence(h, covid19abm.LAT))            
+        val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
+        return val
+    end
+    println("mean R0: $(mean(cd)) with std: $(std(cd))")
+    return cd
+end
+
+function nytest()
+    ## new york test for alison's NYC emails. 
+    ## here we fix beta and loop through isolation levels to see which isolation level pushes R0 below one.
+    nsims = 5000
+    reps = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
+    means = zeros(Float64, nsims, length(reps))   
+    for i = 1:length(reps)
+        iso = reps[i]
+        println("iter: $iso")
+        mval = findr0(0.0485, iso, 5000, :newyork)         
+        means[:, i] .= mval
+    end
+    return means
+end
+
+function _calibrate(beta, nsims, myp::ModelParameters)
+    println("turning calibration on")
+    myp.calibration = true
+    vals = zeros(Int64, nsims)
+    println("calibrating with beta: $(myp.β), total sims: $nsims, province: $(myp.prov)")
+    cd = pmap(1:nsims) do i 
+        h, ags = main(myp) ## gets the entire model. 
+        val = sum(_get_column_incidence(h, covid19abm.LAT))            
+        val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
+        return val
+    end
+    println("mean R0: $(mean(cd)) with std: $(std(cd))")
+    println("turning calibration on")
+    myp.calibration = false    
+    return mean(cd)
 end
 
 function calibrate(beta, nsims, prov=:ontario)
@@ -150,6 +266,7 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.β = beta
     myp.prov = prov
     myp.calibration = true
+    myp.fsevere = 0.0
     vals = zeros(Int64, nsims)
     println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
     cd = pmap(1:nsims) do i 
@@ -233,3 +350,4 @@ end
 
 # http://juliaplots.org/MakieReferenceImages/gallery//lots_of_heatmaps/index.html
 # http://juliaplots.org/MakieReferenceImages/gallery//chess_game/index.html
+
