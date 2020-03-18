@@ -7,7 +7,7 @@ Base.@kwdef mutable struct Human
     idx::Int64 = 0 
     health::HEALTH = SUS
     swap::HEALTH = UNDEF
-    age::Int64   = 0    # in years. 
+    age::Int64   = 0    # in years. don't really need this but left it incase needed later
     ag::Int64    = 0
     tis::Int64   = 0   # time in state 
     exp::Int64   = 0    # max statetime
@@ -19,9 +19,10 @@ end
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0       
     prov::Symbol = :ontario 
-    τmild::Int64 = 1 ## days before they self-isolate 
+    τmild::Int64 = 1 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.05  ## percent of people practice self-isolation
     fsevere::Float64 = 0.80 # fixed at 0.80
+    eldq::Float64 = 0.0 ## complete isolation of elderly
     calibration::Bool = false 
     modeltime::Int64 = 500    
 end
@@ -32,7 +33,7 @@ Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 const HSIZE = 10000
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
-const agebraks = @SVector [0:19, 20:49, 50:64, 65:99]
+const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
 
 export ModelParameters, HEALTH, Human, humans
 
@@ -41,20 +42,22 @@ function main(ip::ModelParameters)
     ## datacollection            
     # matrix to collect model state for every time step
     hmatrix = zeros(Int64, HSIZE, p.modeltime)
-    initialize() # initialize population
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
     
     # reset the parameters for the simulation scenario
     reset_params(ip)
 
+    initialize() # initialize population
+
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
+        # TO DO: checks whether mild, severe, and eldq parameters are set properly. 
         swapupdate = time_update_cal
-        insert_infected(1, 3)  ## function will never isolation nor put in hospital/icu 
+        insert_infected(1, 4)  ## function will never isolation nor put in hospital/icu 
     else 
         swapupdate = time_update
-        insert_infected(5, 3)  
+        insert_infected(5, 4)  
     end    
     
     # start the time loop
@@ -81,28 +84,12 @@ export reset_params
 
 ## Data Collection/ Model State functions
 function _get_model_state(st, hmatrix)
+    # collects the model state (i.e. agent status at time st)
     for i=1:length(humans)
         hmatrix[i, st] = Int(humans[i].health)
     end    
 end
 export _get_model_state
-
-function _modelprev()  
-    ## quickly get model prevalence statistics. 
-    ## recommended to use _get_incidence_and_prev instead.
-    sus = length(findall(x -> x.health == SUS, humans))
-    lat = length(findall(x -> x.health == LAT, humans))
-    mild = length(findall(x -> x.health == MILD, humans))
-    miso = length(findall(x -> x.health == MISO, humans))
-    inf = length(findall(x -> x.health == INF, humans))
-    iiso = length(findall(x -> x.health == IISO, humans))
-    hos = length(findall(x -> x.health == HOS, humans))
-    icu = length(findall(x -> x.health == ICU, humans))
-    rec = length(findall(x -> x.health == REC, humans))
-    ded = length(findall(x -> x.health == DED, humans))
-    return (sus, lat, mild, miso, inf, iiso, hos, icu, rec, ded)
-end
-export _modelprev
 
 function _collectdf(hmatrix)
     ## takes the output of the humans x time matrix and processes it into a dataframe
@@ -121,7 +108,7 @@ function _splitstate(hmatrix, ags)
     #split the full hmatrix into 4 age groups based on ags (the array of age group of each agent)
     #sizes = [length(findall(x -> x == i, ags)) for i = 1:4]
     matx = []#Array{Array{Int64, 2}, 1}(undef, 4)
-    for i = 1:4
+    for i = 1:length(agebraks)
         idx = findall(x -> x == i, ags)
         push!(matx, view(hmatrix, idx, :))
     end
@@ -168,20 +155,23 @@ export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_p
 
 ## initialization functions 
 function get_province_ag(prov) 
-    ret = @match prov begin
-        :ontario   => Distributions.Categorical(@SVector [0.190674655, 0.41015843, 0.224428346, 0.17473857])   
-        :alberta   => Distributions.Categorical(@SVector [0.209225217, 0.457056611, 0.203940396, 0.129777775])
-        :bc        => Distributions.Categorical(@SVector [0.172844215, 0.406074014, 0.231167323, 0.189914448])
-        :manitoba  => Distributions.Categorical(@SVector [0.215274172, 0.410804507, 0.209933322, 0.163988])
-        :newbruns  => Distributions.Categorical(@SVector [0.171227734, 0.370378096, 0.251498338, 0.206895832])
-        :newfdland => Distributions.Categorical(@SVector [0.166635101, 0.377318807, 0.254632629, 0.201413463])
-        :nwterrito => Distributions.Categorical(@SVector [0.231552163, 0.479643766, 0.206870229, 0.081933842])
-        :novasco   => Distributions.Categorical(@SVector [0.169896365, 0.373800103, 0.249685273, 0.206618259])
-        :nunavut   => Distributions.Categorical(@SVector [0.35, 0.478, 0.13, .042])
-        :pei       => Distributions.Categorical(@SVector [0.187067395, 0.36856102, 0.242440801, 0.201930783])
-        :quebec    => Distributions.Categorical(@SVector [0.179873623, 0.395567459, 0.232995696, 0.191563221])
-        :saskat    => Distributions.Categorical(@SVector [0.216249874, 0.408915409, 0.210946403, 0.163888315])
-        :yukon     => Distributions.Categorical(@SVector [0.19054588, 0.43875311, 0.246012001, 0.124689009])
+    println("new func")
+    ret = @match prov begin        
+        :alberta => Distributions.Categorical(@SVector [0.0655, 0.1851, 0.4331, 0.1933, 0.1230])
+        :bc => Distributions.Categorical(@SVector [0.0475, 0.1570, 0.3905, 0.2223, 0.1827])
+        :canada => Distributions.Categorical(@SVector [0.0540, 0.1697, 0.3915, 0.2159, 0.1689])
+        :manitoba => Distributions.Categorical(@SVector [0.0634, 0.1918, 0.3899, 0.1993, 0.1556])
+        :newbruns => Distributions.Categorical(@SVector [0.0460, 0.1563, 0.3565, 0.2421, 0.1991])
+        :newfdland => Distributions.Categorical(@SVector [0.0430, 0.1526, 0.3642, 0.2458, 0.1944])
+        :nwterrito => Distributions.Categorical(@SVector [0.0747, 0.2026, 0.4511, 0.1946, 0.0770])
+        :novasco => Distributions.Categorical(@SVector [0.0455, 0.1549, 0.3601, 0.2405, 0.1990])
+        :nunavut => Distributions.Categorical(@SVector [0.1157, 0.2968, 0.4321, 0.1174, 0.0380])
+        :ontario => Distributions.Categorical(@SVector [0.0519, 0.1727, 0.3930, 0.2150, 0.1674])
+        :pei => Distributions.Categorical(@SVector [0.0490, 0.1702, 0.3540, 0.2329, 0.1939])
+        :quebec => Distributions.Categorical(@SVector [0.0545, 0.1615, 0.3782, 0.2227, 0.1831])
+        :saskat => Distributions.Categorical(@SVector [0.0666, 0.1914, 0.3871, 0.1997, 0.1552])
+        :yukon => Distributions.Categorical(@SVector [0.0597, 0.1694, 0.4179, 0.2343, 0.1187])
+        :newyork   => Distributions.Categorical(@SVector [0.064000, 0.163000, 0.448000, 0.181000, 0.144000])
         _ => error("shame for not knowing your canadian provinces and territories")
     end       
     return ret  
@@ -196,7 +186,12 @@ function initialize()
         x.idx = i 
         x.ag = rand(agedist)
         x.age = rand(agebraks[x.ag]) 
-        x.exp = 999  ## susceptible people don't expire. 
+        x.exp = 999  ## susceptible people don't expire.
+        if x.age >= 60  ## check if elderly need to be quarantined.
+            if rand() < p.eldq
+                x.iso = true
+            end            
+        end
     end
 end
 export initialize
@@ -213,7 +208,11 @@ function insert_infected(num, ag)
             x.swap = REC
             x.tis = 0 
             x.iso = false 
-            x.exp = 5  ## change if needed.            
+            x.exp = 5  ## change if needed.  
+            if rand() < p.fsevere    
+                x.exp = 1  ## 1 day isolation for severe cases     
+                x.swap = IISO
+            end          
         end
     end    
     return h
@@ -261,7 +260,7 @@ export time_update, time_update_cal
 function move_to_latent(x::Human)
     ## transfers human h to the incubation period and samples the duration
     σ = LogNormal(log(5.2), 0.1) # duration of incubation period 
-    θ = (0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
+    θ = (0.8, 0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = LAT
     x.swap = rand() < θ[x.ag] ? MILD : INF  # check whether person will INF or MILD after
     x.tis = 0   # reset time in state 
@@ -279,7 +278,7 @@ function move_to_mild(x::Human)
     x.exp = γ
     x.swap = REC 
     x.iso = false
-    if rand() < p.fmild
+    if rand() < p.fmild 
         x.swap = MISO  
         x.exp = p.τmild
     end
@@ -304,8 +303,8 @@ function move_to_inf(x::Human)
     ## if changing this function, also check if insert_infected needs to be changed. 
 
     # h = prob of hospital, c = prob of icu AFTER hospital    
-    h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
-    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
+    h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
+    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
      
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
@@ -320,7 +319,7 @@ function move_to_inf(x::Human)
     else ## no hospital for this lucky (but severe) individual 
         x.exp = γ  # as in the other functions.  
         x.swap = REC
-        if rand() < p.fsevere    
+        if rand() < p.fsevere 
             x.exp = 1  ## 1 day isolation for severe cases     
             x.swap = IISO
         end
@@ -344,8 +343,8 @@ function move_to_hospicu(x::Human)
     
     ## to do: don't sample from distribution unless needed
     ## to do: check whether the parameters seyed gave are for mean/std or shape/scale
-    mh = [0.001, 0.00135, 0.01225, 0.04]
-    mc = [0.002, 0.0027, 0.0245, 0.08] 
+    mh = [0.001, 0.001, 0.00135, 0.01225, 0.04]
+    mc = [0.002, 0.002, 0.0027, 0.0245, 0.08] 
 
     psiH = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17))))
     psiC = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17)))) + 2
@@ -404,7 +403,7 @@ function dyntrans()
     #     length(infs) > 1 && error("more than one infected person: length: $(length(infs))")
     # end
     totalinf = 0
-    tomeet = map(1:4) do grp
+    tomeet = map(1:length(agebraks)) do grp
         findall(x -> x.iso == false && x.ag == grp , humans)    
     end
     #length(tomeet) <= 5 && return totalinf
@@ -427,51 +426,60 @@ function dyntrans()
         # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
         # enumerate over the 15 groups and randomly select contacts from each group
         for (i, g) in enumerate(gpw)
-            meet = rand(tomeet[i], g)    # sample 'g' number of people from this group 
-            #println("... meeting grp: $g, meet: $meet")
-            for j in meet
-                y = humans[j]
-                bf = p.β
-                if (x.health == MILD || x.health == MISO)
-                    bf = bf * (1 - 0.5)  ## reduction factor 0.5
+            if length(tomeet[i]) > 0 
+                meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
+            
+                for j in meet
+                    y = humans[j]
+                    bf = p.β
+                    if (x.health == MILD || x.health == MISO)
+                        bf = bf * (1 - 0.5)  ## reduction factor 0.5
+                    end
+                    if y.health == SUS && rand() < bf
+                        totalinf += 1
+                        y.swap = LAT
+                        y.exp = y.tis ## force the move to latent in the next time step.
+                    end  
                 end
-                if y.health == SUS && rand() < bf
-                    totalinf += 1
-                    y.swap = LAT
-                    y.exp = y.tis ## force the move to latent in the next time step.
-                end  
-            end
+            end            
         end
     end
     return totalinf
 end
 export dyntrans
 
-function contact_matrix()
-    CM = Array{Array{Float64, 1}, 1}(undef, 4)
-    CM[1]=[0.5712, 0.3214, 0.0722, 0.0353]
-    CM[2]=[0.1830, 0.6253, 0.1423, 0.0494]
-    CM[3]=[0.1336, 0.4867, 0.2723, 0.1074]    
-    CM[4]=[0.1290, 0.4071, 0.2193, 0.2446]
+## old contact matrix
+# function contact_matrix()
+#     CM = Array{Array{Float64, 1}, 1}(undef, 4)
+#     CM[1]=[0.5712, 0.3214, 0.0722, 0.0353]
+#     CM[2]=[0.1830, 0.6253, 0.1423, 0.0494]
+#     CM[3]=[0.1336, 0.4867, 0.2723, 0.1074]    
+#     CM[4]=[0.1290, 0.4071, 0.2193, 0.2446]
+#     return CM
+# end
+
+function contact_matrix() 
+    # regular contacts, just with 5 age groups. 
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    CM = Array{Array{Float64, 1}, 1}(undef, 5)
+    CM[1] = [0.2287, 0.1839, 0.4219, 0.1116, 0.0539]
+    CM[2] = [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
+    CM[3] = [0.0376, 0.1454, 0.6253, 0.1423, 0.0494]
+    CM[4] = [0.0242, 0.1094, 0.4867, 0.2723, 0.1074]
+    CM[5] = [0.0207, 0.1083, 0.4071, 0.2193, 0.2446]
     return CM
 end
-
-# function contact_matrix() 
-## regular contacts, just with 5 age groups. 
-# 0-4, 5-19, 20-49, 50-64, 65+
-#     0.2287    0.1839    0.4219    0.1116    0.0539
-#     0.0276    0.5964    0.2878    0.0591    0.0291
-#     0.0376    0.1454    0.6253    0.1423    0.0494
-#     0.0242    0.1094    0.4867    0.2723    0.1074
-#     0.0207    0.1083    0.4071    0.2193    0.2446
-# end
+# 
+# calibrate for 2.7 r0
+# 20% selfisolation, tau 1 and 2.
 
 function negative_binomials() 
     ## the means/sd here are calculated using _calc_avgag
-    means = [15.30295, 13.7950, 11.2669, 8.0027]
-    sd = [11.1901, 10.5045, 9.5935, 6.9638]
-    nbinoms = Vector{NegativeBinomial{Float64}}(undef, 4)
-    for i = 1:4
+    means = [10.21, 16.793, 13.7950, 11.2669, 8.0027]
+    sd = [7.65, 11.7201, 10.5045, 9.5935, 6.9638]
+    totalbraks = length(means)
+    nbinoms = Vector{NegativeBinomial{Float64}}(undef, totalbraks)
+    for i = 1:totalbraks
         p = 1 - (sd[i]^2-means[i])/(sd[i]^2)
         r = means[i]^2/(sd[i]^2-means[i])
         nbinoms[i] =  NegativeBinomial(r, p)
@@ -500,7 +508,7 @@ function _negative_binomials_15ag()
     ## negative binomials 15 agegroups
     AgeMean = Vector{Float64}(undef, 15)
     AgeSD = Vector{Float64}(undef, 15)
-
+    #0-4, 5-9, 10-14, 15-19, 20-24, 25-29, 30-34, 35-39, 40-44, 45-49, 50-54, 55-59, 60-64, 65-69, 70+
     AgeMean = [10.21, 14.81, 18.22, 17.58, 13.57, 13.57, 14.14, 14.14, 13.83, 13.83, 12.3, 12.3, 9.21, 9.21, 6.89]
     AgeSD = [7.65, 10.09, 12.27, 12.03, 10.6, 10.6, 10.15, 10.15, 10.86, 10.86, 10.23, 10.23, 7.96, 7.96, 5.83]
 
