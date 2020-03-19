@@ -41,14 +41,13 @@ function main(ip::ModelParameters)
     #Random.seed!(sim*726)
     ## datacollection            
     # matrix to collect model state for every time step
-    hmatrix = zeros(Int64, HSIZE, p.modeltime)
-    ags = [x.ag for x in humans] # store a vector of the age group distribution 
-    
+
     # reset the parameters for the simulation scenario
     reset_params(ip)
 
+    hmatrix = zeros(Int64, HSIZE, p.modeltime)
     initialize() # initialize population
-
+    ags = [x.ag for x in humans] # store a vector of the age group distribution 
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
@@ -309,6 +308,11 @@ function move_to_inf(x::Human)
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
 
+    # death rate for severe cases.
+    mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]
+
+    #mh = [0.01*3, 0.01*3, 0.0135*2, 0.01225, 0.03*2]
+    
     x.health = INF
     x.swap = UNDEF
     x.tis = 0 
@@ -317,11 +321,18 @@ function move_to_inf(x::Human)
         x.exp = δ     
         x.swap = rand() < c[x.ag] ? ICU : HOS        
     else ## no hospital for this lucky (but severe) individual 
-        x.exp = γ  # as in the other functions.  
-        x.swap = REC
-        if rand() < p.fsevere 
-            x.exp = 1  ## 1 day isolation for severe cases     
-            x.swap = IISO
+        if rand() < mh[x.ag]
+            x.swap = DED
+            x.iso = true  ## self isolated
+            x.tis = 0     ## reset time in state 
+            x.exp = γ   ## since tau amount of days was already spent as infectious 
+        else 
+            x.exp = γ  # as in the other functions.  
+            x.swap = REC
+            if rand() < p.fsevere 
+                x.exp = 1  ## 1 day isolation for severe cases     
+                x.swap = IISO
+            end  
         end
     end
     ## before returning, check if swap is set 
@@ -332,7 +343,7 @@ function move_to_iiso(x::Human)
     ## transfers human h to the sever isolated infection stage for γ days
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
     oldexp = x.exp
-    x.health = IISO 
+    x.health = IISO   
     x.swap = REC
     x.iso = true  ## self isolated
     x.tis = 0     ## reset time in state 
@@ -340,11 +351,14 @@ function move_to_iiso(x::Human)
 end 
 
 function move_to_hospicu(x::Human)   
-    
     ## to do: don't sample from distribution unless needed
     ## to do: check whether the parameters seyed gave are for mean/std or shape/scale
-    mh = [0.001, 0.001, 0.00135, 0.01225, 0.04]
-    mc = [0.002, 0.002, 0.0027, 0.0245, 0.08] 
+    #mh = [0.001, 0.001, 0.00135, 0.01225, 0.04]
+    #mc = [0.002, 0.002, 0.0027, 0.0245, 0.08] 
+    mh = [0.01*2, 0.01*2, 0.0135, 0.01225, 0.03*2]
+    mc = 2*mh
+    #mh = [0, 0, 0, 0.01225*2, 0.04*2]
+    #mc = [0, 0, 0, 0.01225*3.5, 0.04*3.5]
 
     psiH = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17))))
     psiC = Int(round(rand(truncated(Gamma(4.5, 2.75), 8, 17)))) + 2
