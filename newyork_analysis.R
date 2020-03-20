@@ -133,7 +133,6 @@ gg
 
 
 ### for scenarios only
-
 scenario_data <- function(x){
   s1 = fread("/data/covid19abm/simresults/newyork/b00485/tau0_f00_q00/timelevel_all.dat")
   s2 = fread("/data/covid19abm/simresults/newyork/b00485/tau1_f05_q00/timelevel_all.dat")
@@ -142,7 +141,7 @@ scenario_data <- function(x){
   dt = data.table(s1=s1[, get(x)], s2=s2[, get(x)], s3=s3[, get(x)], s4=s4[, get(x)])
   dt = dt*800 ## 8 mil NYC pop
   dt$time = 1:500
-  lpm = melt(dt, id.vars = "time", measure.vars = c("s1", "s2", "s3", "s4"))
+  lpm = melt(dt[1:150], id.vars = "time", measure.vars = c("s1", "s2", "s3", "s4"))
   return(lpm)
 }
 
@@ -249,6 +248,7 @@ getplot <- function(x, scen){
   gg4 = gg4 + theme(text = element_text(size=15)) 
   gg4 = gg4 + scale_color_manual(values=colors, name="Age Groups", breaks=c("ag1", "ag2", "ag3", "ag4", "ag5"), labels=c("0-4", "5-19", "19-49", "50-64", "65+"))
   gg4 = gg4 + ylab("Total Deaths") + xlab("Time (in days)")
+  gg4 = gg4 + scale_y_continuous(labels = comma)
   gg4 
   return(gg4)
 }
@@ -297,5 +297,86 @@ sum(ag5$ded_inc)/(sum(ag5$ded_inc) + sum(ag3$ded_inc) + sum(ag4$ded_inc) + sum(a
 
 
 sum(all$ded_inc)/sum(all$inf_inc)
+
+
+
+
+## NEW SCENARIO
+scenario_data <- function(x){
+  s1 = fread("/data/covid19abm/simresults/nyc40/timelevel_all.dat")
+  s2 = fread("/data/covid19abm/simresults/nyc50/timelevel_all.dat")
+  s3 = fread("/data/covid19abm/simresults/nyc60/timelevel_all.dat")
+  s4 = fread("/data/covid19abm/simresults/nyc70/timelevel_all.dat")
+  s5 = fread("/data/covid19abm/simresults/nyc00/timelevel_all.dat")
+  dt = data.table(s1=s1[, get(x)], s2=s2[, get(x)], s3=s3[, get(x)], s4=s4[, get(x)], s5=s5[, get(x)])
+  dt = dt*800 ## 8 mil NYC pop
+  dt$time = 1:500
+  lpm = melt(dt[1:150], id.vars = "time", measure.vars = c("s1", "s2", "s3", "s4"))
+  return(lpm)
+}
+
+colors = c("#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e")
+mbreaks=c("s5", "s1", "s4", "s2", "s3")
+mlabels=c("No Control", "40 days", "50 days", "60 days", "70 days")
+ti = scenario_data("lat_prev")
+gg1 = ggplot(ti)
+gg1 = gg1 + geom_line(aes(x = time, y = value, color=variable), size=1.2)
+gg1 = gg1 + theme_bw()
+gg1 = gg1 + ggtitle("Total infections")
+gg1 = gg1 + theme(text = element_text(size=15)) 
+gg1 = gg1 + scale_color_manual(values=colors, name="Scenario", breaks=mbreaks, labels=mlabels)
+gg1 = gg1 + ylab("Prevalence") + xlab("Time (in days)")
+gg1 = gg1 + scale_y_continuous(labels = comma)
+gg1 
+
+hos = scenario_data("hos_prev")
+gg2 = ggplot(hos)
+gg2 = gg2 + geom_line(aes(x = time, y = value, color=variable), size=1.2)
+gg2 = gg2 + theme_bw()
+gg2 = gg2 + ggtitle("Hospitalization")
+gg2 = gg2 + theme(text = element_text(size=15)) 
+gg2 = gg2 + scale_color_manual(values=colors, name="Scenario", breaks=mbreaks, labels=mlabels)
+gg2 = gg2 + ylab("Prevalence") + xlab("Time (in days)")
+gg2 = gg2 + scale_y_continuous(labels = comma)
+gg2 
+
+
+icu = scenario_data("icu_prev")
+gg3 = ggplot(icu)
+gg3 = gg3 + geom_line(aes(x = time, y = value, color=variable), size=1.2)
+gg3 = gg3 + theme_bw()
+gg3 = gg3 + ggtitle("ICU")
+gg3 = gg3 + theme(text = element_text(size=15)) 
+gg3 = gg3 + scale_color_manual(values=colors, name="Scenario", breaks=mbreaks, labels=mlabels)
+gg3 = gg3 + ylab("Prevalence") + xlab("Time (in days)")
+gg3 = gg3 + scale_y_continuous(labels = comma)
+gg3 
+
+ded = scenario_data("ded_prev")
+gg4 = ggplot(ded)
+gg4 = gg4 + geom_line(aes(x = time, y = value, color=variable), size=1.2)
+gg4 = gg4 + theme_bw()
+gg4 = gg4 + ggtitle("Total Deaths")
+gg4 = gg4 + theme(text = element_text(size=15)) 
+gg4 = gg4 + scale_color_manual(values=colors, name="Scenario", breaks=mbreaks, labels=mlabels)
+gg4 = gg4 + ylab("Total Deaths") + xlab("Time (in days)")
+gg4 = gg4 + scale_y_continuous(labels = comma)
+gg4 
+
+get_legend<-function(myggplot){
+  tmp <- ggplot_gtable(ggplot_build(myggplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
+legend <- get_legend(gg1)
+
+gg1 <- gg1 + theme(legend.position="none")
+gg2 <- gg2 + theme(legend.position="none")
+gg3 <- gg3 + theme(legend.position="none")
+gg4 <- gg4 + theme(legend.position="none")
+
+# 4. Arrange ggplot2 graphs with a specific width
+grid.arrange(gg1, gg2, legend, gg3, gg4, nrow = 2, ncol=3)
 
 

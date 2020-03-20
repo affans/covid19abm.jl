@@ -37,7 +37,7 @@ const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
 
 export ModelParameters, HEALTH, Human, humans
 
-function main(ip::ModelParameters)
+function main(ip::ModelParameters, sttime)
     #Random.seed!(sim*726)
     ## datacollection            
     # matrix to collect model state for every time step
@@ -63,7 +63,11 @@ function main(ip::ModelParameters)
     for st = 1:p.modeltime
         # start of day
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        totalinf = dyntrans()
+        if st < sttime 
+            totalinf = dyntrans_initial()
+        else 
+            totalinf = dyntrans_after()
+        end
         sw = swapupdate()
         # end of day
     end
@@ -411,7 +415,78 @@ function move_to_recovered(h::Human)
     h.iso = false ## a recovered person has ability to meet others
 end
 
-function dyntrans()
+function dyntrans_after()
+    infs = findall(x -> x.health in (INF, MILD, MISO, IISO), humans)
+    totalinf = 0
+    tomeet = map(1:length(agebraks)) do grp
+        findall(x -> x.iso == false && x.ag == grp , humans)    
+    end
+    ## algorithm for NY scenario 
+    # INF, 65+ 
+    #     number of contacts: maximum 3 contacts per day 100%
+    # --> SUSC: <65 no reduction in transmission 
+    # --> SUSC: 65+ 90% reduction in transmission => interpretation in addition to being inside (, don't allow transmission to go to them by 90%.)
+
+    # INF, <65 
+    #     number of contacts 80% maximum 3, 20% regular distribution (check for isolation).        
+    # --> SUSC: <65, no reduction in transmission 
+    # --> SUSC: 65+, 90% reduction in transmission => interpretation in addition to being inside (, don't allow transmission to go to them by 90%.)
+
+    for xid in infs
+        x = humans[xid]
+        ag = x.ag   
+        if x.age > 60 
+            cnt = rand(1:3)
+        else 
+            if rand() < 0.80
+                cnt = rand(1:3)
+            else 
+                if (x.health == IISO || x.health == MISO)
+                    cnt = rand(1:3)
+                else
+                    cnt = rand(nbs[ag])
+                end                
+            end
+        end
+        cnt >= length(tomeet[ag]) && error("error here")
+        
+        # distribute cnt_meet to different groups based on contact matrix. 
+        # these are not probabilities, but proportions. be careful. 
+        # going from cnt to the gpw array might remove a contact or two due to rounding. 
+        gpw = Int.(round.(cm[ag]*cnt)) 
+        #println("cnt: $cnt, gpw: $gpw")
+        # let's stratify the human population in it's age groups. 
+        # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
+        # enumerate over the 15 groups and randomly select contacts from each group
+        for (i, g) in enumerate(gpw)
+            if length(tomeet[i]) > 0 
+                meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
+            
+                for j in meet
+                    y = humans[j]
+                    bf = p.β
+                    # if the infected person is mild, miso then transmissinon reduced
+                    if (x.health == MILD || x.health == MISO)
+                        bf = bf * (1 - 0.5)  ## reduction factor 0.5
+                    end
+                    # if person is over 60, transmission reduced ... because they are sheltered
+                    if y.age > 60 
+                        bf = bf * (1 - 0.0)
+                    end
+
+                    if y.health == SUS && rand() < bf
+                        totalinf += 1
+                        y.swap = LAT
+                        y.exp = y.tis ## force the move to latent in the next time step.
+                    end  
+                end
+            end            
+        end
+    end
+    return totalinf
+end
+
+function dyntrans_initial()
     infs = findall(x -> x.health in (INF, MILD, MISO, IISO), humans)
     # if p.calibration 
     #     length(infs) > 1 && error("more than one infected person: length: $(length(infs))")
@@ -460,7 +535,7 @@ function dyntrans()
     end
     return totalinf
 end
-export dyntrans
+
 
 ## old contact matrix
 # function contact_matrix()

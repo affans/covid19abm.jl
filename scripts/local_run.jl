@@ -19,13 +19,13 @@ const cv=covid19abm
 addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.")
 @everywhere using covid19abm
 
-function run(myp::ModelParameters, nsims=500, folderprefix="./")
+function run(myp::ModelParameters, sttime, nsims=500, folderprefix="./")
     println("starting $nsims simulations...\nsave folder set to $(folderprefix)")
     dump(myp)
     myp.calibration && error("can not run simulation, calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
     cd = pmap(1:nsims) do x                 
-        hmatrix, ags = main(myp)        
+        hmatrix, ags = main(myp, sttime)        
         all = _collectdf(hmatrix)
         spl = _splitstate(hmatrix, ags)
         ag1 = _collectdf(spl[1])
@@ -107,48 +107,75 @@ function run_ny_scenario()
     myp = covid19abm.ModelParameters()
     nsims = 500
     start = time()
-    
     myp.β = 0.0485 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
     myp.fsevere = 0 
-    _calibrate(0.0485, 1000, myp)
+    #_calibrate(0.0485, 1000, myp)
     myp.prov = :newyork 
-
     ## scenario 1: no isolation, no quarantine of individuals
     myp.fsevere = 0
     myp.fmild = 0 
     myp.τmild = 0  
     myp.eldq = 0    
-    prefix = savestr(myp)
+    prefix = "/data/covid19abm/simresults/nyc40"
+    mkpath(prefix)
     println("$prefix")
-    run(myp, 500, prefix)
-    
-    ## scenario 2: 50% self-isolation, no quarantine of individuals
-    myp.fsevere = 0.50
-    myp.fmild = 0.50 
-    myp.τmild = 1
-    myp.eldq = 0  
-    prefix = savestr(myp)
+    run(myp, 40, 500, prefix)
+    myp.fsevere = 0
+    myp.fmild = 0 
+    myp.τmild = 0  
+    myp.eldq = 0    
+    prefix = "/data/covid19abm/simresults/nyc50"
+    mkpath(prefix)
     println("$prefix")
-    run(myp, 500, prefix)
-
-    ## scenario 3: 50% self-isolation, + 90% of 60+ quarantine. 
-    myp.fsevere = 0.50
-    myp.fmild = 0.50 
-    myp.τmild = 1
-    myp.eldq = 0.90         
-    prefix = savestr(myp)
+    run(myp, 50, 500, prefix)
+    myp.fsevere = 0
+    myp.fmild = 0 
+    myp.τmild = 0  
+    myp.eldq = 0    
+    prefix = "/data/covid19abm/simresults/nyc60"
+    mkpath(prefix)
     println("$prefix")
-    run(myp, 500, prefix)
-
-    ## scenario 4: 50% self-isolation, + 90% of 60+ quarantine. 
-    myp.fsevere = 0.0
-    myp.fmild = 0.0 
-    myp.τmild = 0
-    myp.eldq = 0.90         
-    prefix = savestr(myp)
+    run(myp, 60, 500, prefix)
+    myp.fsevere = 0
+    myp.fmild = 0 
+    myp.τmild = 0  
+    myp.eldq = 0    
+    prefix = "/data/covid19abm/simresults/nyc70"
+    mkpath(prefix)
     println("$prefix")
-    run(myp, 500, prefix)
-
+    run(myp, 70, 500, prefix)
+    myp.fsevere = 0
+    myp.fmild = 0 
+    myp.τmild = 0  
+    myp.eldq = 0    
+    prefix = "/data/covid19abm/simresults/nyc00"
+    mkpath(prefix)
+    println("$prefix")
+    run(myp, 500, 500, prefix)
+    # ## scenario 2: 50% self-isolation, no quarantine of individuals
+    # myp.fsevere = 0.50
+    # myp.fmild = 0.50 
+    # myp.τmild = 1
+    # myp.eldq = 0  
+    # prefix = savestr(myp)
+    # println("$prefix")
+    # run(myp, 500, prefix)
+    # ## scenario 3: 50% self-isolation, + 90% of 60+ quarantine. 
+    # myp.fsevere = 0.50
+    # myp.fmild = 0.50 
+    # myp.τmild = 1
+    # myp.eldq = 0.90         
+    # prefix = savestr(myp)
+    # println("$prefix")
+    # run(myp, 500, prefix)
+    # ## scenario 4: 50% self-isolation, + 90% of 60+ quarantine. 
+    # myp.fsevere = 0.0
+    # myp.fmild = 0.0 
+    # myp.τmild = 0
+    # myp.eldq = 0.90         
+    # prefix = savestr(myp)
+    # println("$prefix")
+    # run(myp, 500, prefix)
     # fs = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
     # for f in fs 
     #     myp.τmild  = 1
@@ -351,3 +378,5 @@ end
 # http://juliaplots.org/MakieReferenceImages/gallery//lots_of_heatmaps/index.html
 # http://juliaplots.org/MakieReferenceImages/gallery//chess_game/index.html
 
+    #length(tomeet) <= 5 && return totalinf
+ 
