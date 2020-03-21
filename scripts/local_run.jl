@@ -22,7 +22,7 @@ addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.
 function run(myp::ModelParameters, nsims=500, folderprefix="./")
     println("starting $nsims simulations...\nsave folder set to $(folderprefix)")
     dump(myp)
-    myp.calibration && error("can not run simulation, calibration is on.")
+    myp.calibration && error("can not run simulation: calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
     cd = pmap(1:nsims) do x                 
         hmatrix, ags = main(myp)        
@@ -103,63 +103,48 @@ function compute_yearly_average(df)
     return ya
 end
 
-function run_ny_scenario()
+function run_school_closure()
     myp = covid19abm.ModelParameters()
     nsims = 500
     start = time()
     
-    myp.β = 0.0485 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
+    myp.β = 0.0455 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
     myp.fsevere = 0 
-    _calibrate(0.0485, 1000, myp)
-    myp.prov = :newyork 
+    myp.prov = :ontario
+    _calibrate(1000, myp)
 
-    ## scenario 1: no isolation, no quarantine of individuals
-    myp.fsevere = 0
-    myp.fmild = 0 
-    myp.τmild = 0  
-    myp.eldq = 0    
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
     
-    ## scenario 2: 50% self-isolation, no quarantine of individuals
-    myp.fsevere = 0.50
-    myp.fmild = 0.50 
-    myp.τmild = 1
-    myp.eldq = 0  
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
-
-    ## scenario 3: 50% self-isolation, + 90% of 60+ quarantine. 
-    myp.fsevere = 0.50
-    myp.fmild = 0.50 
-    myp.τmild = 1
-    myp.eldq = 0.90         
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
-
-    ## scenario 4: 50% self-isolation, + 90% of 60+ quarantine. 
+    ## scenario no school clsure
     myp.fsevere = 0.0
-    myp.fmild = 0.0 
-    myp.τmild = 0
-    myp.eldq = 0.90         
-    prefix = savestr(myp)
+    myp.fmild = 0.0
+    myp.τmild = 0 ##1 day for self-isolation 
+    myp.contact_reduction = (1, 1, 1, 1, 1)
+    myp.eldq = 0    
+    myp.schoolclosuretime_start = 999 
+    myp.schoolclosuretime_end = 999
+    prefix = "/data/covid19abm/schoolclosure/noclosure/"
+    mkpath(prefix)
     println("$prefix")
     run(myp, 500, prefix)
 
-    # fs = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
-    # for f in fs 
-    #     myp.τmild  = 1
-    #     myp.fmild = f
-    #     myp.fsevere = f       
-    #     _calibrate(0.0485, 5000, myp)         
-    #     myp.calibration = false
-    #     prefix = savestr(myp)
-    #     run(myp, 500, prefix)
-    # end
-    println("done newyork")
+    ## scenario analysis, 3 6, 12 16 weeks starting at week 30
+    myp.fsevere = 0.80 
+    myp.eldq = 0    
+    myp.schoolclosuretime_start = 30 
+    for r in (0.2, 0.4), cl in (52, 72, 114, 142), fv in (0.0, 0.10, 0.20)
+        myp.fmild = fv 
+        myp.τmild = 1 ##1 day for self-isolation 
+        myp.contact_reduction = (1, r, 1, 1, 1)
+        myp.schoolclosuretime_end = cl
+        fstr = replace(string(myp.fmild), "." => "")
+        red_str = replace(string(r*10, "per"), "." => "")  ## multiply by ten so its "20%" 
+        cl_str = string(cl, "weeks")
+        prefix = "/data/covid19abm/schoolclosure/fmild$(fstr)/$red_str/$cl_str/"
+        mkpath(prefix)
+        println("$prefix")
+        run(myp, 500, prefix)
+    end
+    println("done...")
 end
 
 function run_scenarios()
@@ -229,22 +214,8 @@ function findr0(beta, fval, nsims, prov=:ontario)
     return cd
 end
 
-function nytest()
-    ## new york test for alison's NYC emails. 
-    ## here we fix beta and loop through isolation levels to see which isolation level pushes R0 below one.
-    nsims = 5000
-    reps = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
-    means = zeros(Float64, nsims, length(reps))   
-    for i = 1:length(reps)
-        iso = reps[i]
-        println("iter: $iso")
-        mval = findr0(0.0485, iso, 5000, :newyork)         
-        means[:, i] .= mval
-    end
-    return means
-end
 
-function _calibrate(beta, nsims, myp::ModelParameters)
+function _calibrate(nsims, myp::ModelParameters)
     println("turning calibration on")
     myp.calibration = true
     vals = zeros(Int64, nsims)
@@ -267,16 +238,7 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.prov = prov
     myp.calibration = true
     myp.fsevere = 0.0
-    vals = zeros(Int64, nsims)
-    println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
-    cd = pmap(1:nsims) do i 
-        h, ags = main(myp) ## gets the entire model. 
-        val = sum(_get_column_incidence(h, covid19abm.LAT))            
-        val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
-        return val
-    end
-    println("mean R0: $(mean(cd)) with std: $(std(cd))")
-    return mean(cd)
+    _calibrate(nsims, myp)
 end
 
 function calibrate_robustness(beta, prov=:ontario)

@@ -25,6 +25,9 @@ end
     eldq::Float64 = 0.0 ## complete isolation of elderly
     calibration::Bool = false 
     modeltime::Int64 = 500    
+    contact_reduction::NTuple{5,Float64} = (1,1,1,1,1)
+    schoolclosuretime_start::Int64 = 999
+    schoolclosuretime_end::Int64 = 999
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -48,23 +51,37 @@ function main(ip::ModelParameters)
     hmatrix = zeros(Int64, HSIZE, p.modeltime)
     initialize() # initialize population
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
+
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
         # TO DO: checks whether mild, severe, and eldq parameters are set properly. 
+        # TO DO: check if matrix is set to  regular
         swapupdate = time_update_cal
         insert_infected(1, 4)  ## function will never isolation nor put in hospital/icu 
     else 
         swapupdate = time_update
         insert_infected(5, 4)  
     end    
-    
+
+    # get the contact matrix
+    cm = contact_matrix_regular()
+
+    sc_start = p.schoolclosuretime_start 
+    sc_end = p.schoolclosuretime_end
     # start the time loop
     for st = 1:p.modeltime
         # start of day
+        if st == sc_start
+            cm[2] = p.contact_reduction .* [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
+        end        
+        if st == sc_end
+            cm[2] = (1, 1, 1, 1, 1) .* [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
+        end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        totalinf = dyntrans()
+        totalinf = dyntrans(cm)
         sw = swapupdate()
+
         # end of day
     end
     return hmatrix, ags ## return the model state as well as the age groups. 
@@ -154,7 +171,6 @@ export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_p
 
 ## initialization functions 
 function get_province_ag(prov) 
-    println("new func")
     ret = @match prov begin        
         :alberta => Distributions.Categorical(@SVector [0.0655, 0.1851, 0.4331, 0.1933, 0.1230])
         :bc => Distributions.Categorical(@SVector [0.0475, 0.1570, 0.3905, 0.2223, 0.1827])
@@ -186,10 +202,8 @@ function initialize()
         x.ag = rand(agedist)
         x.age = rand(agebraks[x.ag]) 
         x.exp = 999  ## susceptible people don't expire.
-        if x.age >= 60  ## check if elderly need to be quarantined.
-            if rand() < p.eldq
+        if x.age >= 60 && rand() < p.eldq 
                 x.iso = true
-            end            
         end
     end
 end
@@ -310,8 +324,6 @@ function move_to_inf(x::Human)
 
     # death rate for severe cases.
     mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]
-
-    #mh = [0.01*3, 0.01*3, 0.0135*2, 0.01225, 0.03*2]
     
     x.health = INF
     x.swap = UNDEF
@@ -411,16 +423,14 @@ function move_to_recovered(h::Human)
     h.iso = false ## a recovered person has ability to meet others
 end
 
-function dyntrans()
+function dyntrans(cm) 
+    ## function accepts arbitrary contact matrix
     infs = findall(x -> x.health in (INF, MILD, MISO, IISO), humans)
-    # if p.calibration 
-    #     length(infs) > 1 && error("more than one infected person: length: $(length(infs))")
-    # end
     totalinf = 0
     tomeet = map(1:length(agebraks)) do grp
         findall(x -> x.iso == false && x.ag == grp , humans)    
     end
-    #length(tomeet) <= 5 && return totalinf
+
     for xid in infs
         x = humans[xid]
         ag = x.ag   
@@ -472,9 +482,14 @@ export dyntrans
 #     return CM
 # end
 
-function contact_matrix() 
+
+function contact_matrix_regular() 
     # regular contacts, just with 5 age groups. 
+    # the tuple p.contact_reduction changes the distribution of contacts of age group 2 individuals.
     #  0-4, 5-19, 20-49, 50-64, 65+
+    # !!!
+    # IF CHANGING THIS FUNCTION, UPDATE THE FUNCTION BELOW
+    # !!!
     CM = Array{Array{Float64, 1}, 1}(undef, 5)
     CM[1] = [0.2287, 0.1839, 0.4219, 0.1116, 0.0539]
     CM[2] = [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
@@ -483,9 +498,7 @@ function contact_matrix()
     CM[5] = [0.0207, 0.1083, 0.4071, 0.2193, 0.2446]
     return CM
 end
-# 
-# calibrate for 2.7 r0
-# 20% selfisolation, tau 1 and 2.
+
 
 function negative_binomials() 
     ## the means/sd here are calculated using _calc_avgag
@@ -501,8 +514,7 @@ function negative_binomials()
     return nbinoms   
 end
 const nbs = negative_binomials()
-const cm = contact_matrix()
-export negative_binomials, contact_matrix, nbs, cm
+export negative_binomials, nbs, cm
 
 
 ## internal functions to do intermediate calculations

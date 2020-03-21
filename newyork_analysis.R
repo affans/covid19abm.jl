@@ -299,3 +299,33 @@ sum(ag5$ded_inc)/(sum(ag5$ded_inc) + sum(ag3$ded_inc) + sum(ag4$ded_inc) + sum(a
 sum(all$ded_inc)/sum(all$inf_inc)
 
 
+
+
+
+
+### school closure 
+scenario_data <- function(x){
+  s1 = fread("/data/covid19abm/schoolclosure/reg/timelevel_ag5.dat")
+  s2 = fread("/data/covid19abm/schoolclosure/clo/timelevel_ag5.dat")
+  
+  dt = data.table(s1=s1[, get(x)], s2=s2[, get(x)])
+  dt$time = 1:500
+  lpm = melt(dt[1:200], id.vars = "time", measure.vars = c("s1", "s2"))
+  return(lpm)
+}
+
+ti = scenario_data("lat_inc")
+gg1 = ggplot(ti)
+gg1 = gg1 + geom_line(aes(x = time, y = value, color=variable), size=1.2)
+gg1 = gg1 + theme_bw()
+gg1 = gg1 + ggtitle("Total infections")
+gg1 = gg1 + theme(text = element_text(size=15)) 
+gg1 = gg1 + scale_color_manual(values=colors, name="Scenario", breaks=c("s1", "s2"), labels=c("No control", "School Closure"))
+gg1 = gg1 + ylab("Prevalence") + xlab("Time (in days)")
+gg1 = gg1 + scale_y_continuous(labels = comma)
+gg1 
+sum(ti[variable == "s1"]$value)
+sum(ti[variable == "s2"]$value)
+
+colors = c("#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e")
+
