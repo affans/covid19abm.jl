@@ -25,6 +25,7 @@ end
     eldq::Float64 = 0.0 ## complete isolation of elderly
     calibration::Bool = false 
     modeltime::Int64 = 500    
+    beta_timedepedent::Bool = false
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -59,11 +60,18 @@ function main(ip::ModelParameters)
         insert_infected(5, 4)  
     end    
     
+    if p.beta_timedepedent
+        tmp = td_beta.(1:p.modeltime)
+        betavalues = (tmp .- minimum(tmp))./(maximum(tmp) .- 4*minimum(tmp));
+    else
+        betavalues = [p.β for _=1:p.modeltime]
+    end
+    
     # start the time loop
     for st = 1:p.modeltime
         # start of day
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        totalinf = dyntrans()
+        totalinf = dyntrans(st, betavalues)  ## pass the transmission function time value.
         sw = swapupdate()
         # end of day
     end
@@ -411,7 +419,18 @@ function move_to_recovered(h::Human)
     h.iso = false ## a recovered person has ability to meet others
 end
 
-function dyntrans()
+function td_beta(t)
+    ## returns a time-dependent beta value
+    a0 = 6.261
+    a1 = -11.81
+    b1 = 1.817
+    w = 0.01815
+    temp =  a0 + a1*cos(t*w) + b1*sin(t*w)
+    return temp
+end
+
+
+function dyntrans(t, betavalues)
     infs = findall(x -> x.health in (INF, MILD, MISO, IISO), humans)
     # if p.calibration 
     #     length(infs) > 1 && error("more than one infected person: length: $(length(infs))")
@@ -445,7 +464,7 @@ function dyntrans()
             
                 for j in meet
                     y = humans[j]
-                    bf = p.β
+                    bf = betavalues[t]#p.β
                     if (x.health == MILD || x.health == MISO)
                         bf = bf * (1 - 0.5)  ## reduction factor 0.5
                     end
