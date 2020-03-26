@@ -108,12 +108,10 @@ function run_school_closure()
     nsims = 500
     start = time()
     
-    myp.β = 0.0455 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
-    myp.fsevere = 0 
+    myp.β = 0.0455 #0.0275  #r0 =1.5 #0.0455 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7 
     myp.prov = :ontario
-    _calibrate(1000, myp)
+    calibrate(myp.β, 2000)
 
-    
     ## scenario no school clsure
     myp.fsevere = 0.0
     myp.fmild = 0.0
@@ -131,7 +129,7 @@ function run_school_closure()
     myp.fsevere = 0.80 
     myp.eldq = 0    
     myp.schoolclosuretime_start = 30 
-    for r in (0.2, 0.4), cl in (52, 72, 114, 142), fv in (0.0, 0.10, 0.20)
+    for r in (0.2, 0.4), cl in (52, 72, 114, 142), fv in (0.0, 0.10, 0.20, 0.50)
         myp.fmild = fv 
         myp.τmild = 1 ##1 day for self-isolation 
         myp.contact_reduction = (1, r, 1, 1, 1)
