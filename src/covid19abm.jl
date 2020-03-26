@@ -71,6 +71,7 @@ function main(ip::ModelParameters)
 end
 export main
 
+reset_params_default() = reset_params(ModelParameters())
 function reset_params(ip::ModelParameters)
     # the p is a global const
     # the ip is an incoming different instance of parameters 
@@ -179,7 +180,7 @@ export get_province_ag
 
 function initialize() 
     agedist = get_province_ag(p.prov)
-    @inbounds for i = 1:length(humans) 
+    @inbounds for i = 1:HSIZE 
         humans[i] = Human()              ## create an empty human       
         x = humans[i]
         x.idx = i 
