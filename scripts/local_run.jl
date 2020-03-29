@@ -108,7 +108,7 @@ function run_scenarios()
     start = time()
     betas=[0.0365, 0.0455]
     prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
-    fs = (0.10, 0.20, 0.40)
+    fs = (0.10, 0.20, 0.40, 0.60, 0.80)
     τs = (1, 2)      
     ts = length(betas) * length(fs) * length(τs) 
     nsims = 500
