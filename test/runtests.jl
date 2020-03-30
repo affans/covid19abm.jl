@@ -50,18 +50,18 @@ end
     ## insert_infected check if infected person is added in the correct age group
     for ag in inmodel 
         initialize() # reset population
-        insert_infected(1, ag) # 1 infected in age group ag
+        insert_infected(cv.INF, 1, ag) # 1 infected in age group ag
         @test length(findall(x -> x.health == cv.INF && x.ag == ag, cv.humans)) == 1
     end
     ## check if the initial infected person is NOT IISO 
     cv.p.fsevere = 0.0 
     initialize() # reset population
-    insert_infected(1, 1) # 1 infected in age group ag
+    insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
     ## check if the initial infected person is IISO 
     cv.p.fsevere = 1.0 
     initialize() # reset population
-    insert_infected(1, 1) # 1 infected in age group ag
+    insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     @test length(findall(x -> x.health == cv.INF && x.swap == cv.IISO, cv.humans)) == 1
 end
 
@@ -69,15 +69,21 @@ end
     cv.reset_params_default()
     initialize()
     
-    ## check if tis is up by one
-    time_update()
-    for x in humans 
+    ## check if time in state is up by one
+    cv.time_update()
+    for x in cv.humans 
         @test x.tis == 1  
+        @test x.exp == 999
         @test x.health == cv.SUS
         @test x.swap == cv.UNDEF ## shouldn't set a swap 
     end
 
-    #check if it goes through all the move compartments 
+    for x in cv.humans 
+        x.exp = 0 ## this will trigger a swap
+    end
+    @test_throws ErrorException("swap expired, but no swap set.") cv.time_update()
+
+    #check if it goes through all the move compartments and see if health/swap changes
     
     for h in 2:9  ## latent to ded, ignore susceptible
         initialize()
@@ -89,7 +95,7 @@ end
         time_update() ## since tis > exp 
         for x in humans[1:5]
             @test x.health == rh
-            if rh ∈ infectiousstates 
+            if rh ∈ infectiousstates  ## for all states, except rec/ded there should be a swap
                 @test x.swap != cv.UNDEF
             end
         end    
@@ -109,7 +115,7 @@ end
     @test totalinf == 0
 
     # check with only a single infected person 
-    insert_infected(1, 1) # 1 infected in age group ag
+    insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     totalinf = dyntrans()  
     @test totalinf == 0 # still zero cuz beta = 0
 
@@ -121,6 +127,39 @@ end
     ## somehow check the transmission reduction and number of contacts
 end
 
-@testset "model" begin
+@testset "calibration" begin
     # to do, run the model and test total number of infections 
+    myp = cv.ModelParameters()
+    myp.calibration = true
+    myp.fsevere = 0.0
+    myp.β = 1.0
+    cv.reset_params(myp)
+    cv.initialize()
+    cv.insert_infected(cv.PRE, 1, 4)
+    # find the single insert_presymptomatic person
+    h = findall(x -> x.health == cv.PRE, cv.humans)
+    x = humans[h[1]]
+    @test length(h) == 1
+    @test x.ag == 4
+    @test x.swap == cv.INF ## always true for calibration 
+    cv.time_update_cal() # run calibrate time time_update
+    @test x.health == cv.INF
+    @test x.swap == cv.REC
+    @test x.tis == 0 
+    @test x.iso == false 
+    @test x.exp == 5  ## change if needed.  
+
+    for i = 1:20 ## run for 20 days 
+        cv.dyntrans()
+        cv.time_update_cal()
+    end
+    @test x.health == cv.REC  ## make sure the initial guy recovered
+    @test x.exp == 999
+    ## everyone should really be in latent
+    all = findall(x -> x.health ∈ (cv.PRE, cv.ASYMP, cv.MILD, cv.MISO, cv.INF, cv.IISO, cv.HOS, cv.ICU, cv.DED), humans)
+    @test length(all) == 0
+    ## to do, make sure everyone stays latent
+    
 end
+
+

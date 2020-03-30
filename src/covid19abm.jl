@@ -1,7 +1,7 @@
 module covid19abm
 using Parameters, Distributions, StatsBase, StaticArrays, Random, Match, DataFrames
 
-@enum HEALTH SUS LAT MILD MISO INF IISO HOS ICU REC DED UNDEF
+@enum HEALTH SUS LAT PRE ASYMP MILD MISO INF IISO HOS ICU REC DED UNDEF
 
 Base.@kwdef mutable struct Human
     idx::Int64 = 0 
@@ -23,6 +23,8 @@ end
     fmild::Float64 = 0.05  ## percent of people practice self-isolation
     fsevere::Float64 = 0.80 # fixed at 0.80
     eldq::Float64 = 0.0 ## complete isolation of elderly
+    fasymp::Float64 = 0.50 ## percent going to asymp
+    fpre::Float64 = 0.50 ## percent going to presymptomatic
     calibration::Bool = false 
     modeltime::Int64 = 500    
 end
@@ -52,10 +54,10 @@ function main(ip::ModelParameters)
     # and setup the right swap function. 
     if p.calibration 
         swapupdate = time_update_cal
-        insert_infected(1, 4)  ## function will never isolation nor put in hospital/icu 
+        insert_infected(PRE, 1, 4)
     else 
         swapupdate = time_update
-        insert_infected(5, 4)  
+        insert_infected(INF, 5, 4)  
     end    
     
     # start the time loop
@@ -194,7 +196,7 @@ function initialize()
 end
 export initialize
 
-function insert_infected(num, ag) 
+function insert_infected(health, num, ag) 
     ## inserts a number of infected people in the population randomly
     ## this function should resemble move_to_inf()
     l = findall(x -> x.health == SUS && x.ag == ag, humans)
@@ -202,15 +204,16 @@ function insert_infected(num, ag)
         h = sample(l, num; replace = false)
         @inbounds for i in h 
             x = humans[i]
-            x.health = INF
-            x.swap = REC
-            x.tis = 0 
-            x.iso = false 
-            x.exp = 5  ## change if needed.  
-            if rand() < p.fsevere    
-                x.exp = 1  ## 1 day isolation for severe cases     
-                x.swap = IISO
-            end          
+            if health == PRE 
+                move_to_pre(x) ## the swap may be asymp, mild, or severe, but we can force severe in the time_update function
+                if p.calibration ## if calibration is on, the initial person will always swap to SIMPLE INF
+                    x.swap = INF
+                end
+            elseif health == INF
+                move_to_infsimple(x)
+            else 
+                error("can not insert human of health $(health)")
+            end            
         end
     end    
     return h
@@ -219,12 +222,14 @@ export insert_infected
 
 function time_update()
     # counters to calculate incidence
-    lat=0; mild=0; miso=0; inf=0; infiso=0; hos=0; icu=0; rec=0; ded=0;
+    lat=0; pre=0; asymp=0; mild=0; miso=0; inf=0; infiso=0; hos=0; icu=0; rec=0; ded=0;
     for x in humans 
         x.tis += 1 
         if x.tis >= x.exp             
             @match Symbol(x.swap) begin
                 :LAT  => begin move_to_latent(x); lat += 1; end
+                :PRE  => begin move_to_pre(x); pre += 1; end
+                :ASYMP => begin move_to_asymp(x); asymp += 1; end
                 :MILD => begin move_to_mild(x); mild += 1; end
                 :MISO => begin move_to_miso(x); miso += 1; end
                 :INF  => begin move_to_inf(x); inf +=1; end    
@@ -246,12 +251,16 @@ function time_update_cal()
     a = 0
     for x in humans 
         x.tis += 1 
-        if x.tis >= x.exp     
-            move_to_latent(x)  ## after expiry from latent, they renew in latent.    
-            a += 1           
+        if x.tis >= x.exp 
+            @match Symbol(x.swap) begin
+                :LAT  => begin move_to_latent(x); x.swap = LAT; x.exp = 999 end
+                :INF  => begin move_to_infsimple(x); end    
+                :REC  => begin move_to_recovered(x); end
+                _    => error("swap expired, but no swap set.")
+            end
         end
     end
-    return (a, 0, 0, 0, 0, 0, 0, 0, 0) ## needs to return the same length tuple as time_update    
+    return a
 end
 export time_update, time_update_cal
 
@@ -260,13 +269,59 @@ function move_to_latent(x::Human)
     σ = LogNormal(log(5.2), 0.1) # duration of incubation period 
     θ = (0.8, 0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = LAT
-    x.swap = rand() < θ[x.ag] ? MILD : INF  # check whether person will INF or MILD after
     x.tis = 0   # reset time in state 
-    x.exp = Int(round(rand(σ)))
+
+    ## set up swap
+    if rand() < p.fpre
+        x.swap = PRE
+        x.exp = Int(round(rand(σ))) - 1
+    else 
+        if rand() < θ[x.ag]
+            if rand() < p.fasymp 
+                x.swap = ASYMP
+            else 
+                x.swap = MILD 
+            end        
+        else 
+            x.swap = INF
+        end
+        x.exp = Int(round(rand(σ)))
+    end
+    
     x.iso = false # starting at latent, person is not isolated from the community   
     x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
 export move_to_latent
+
+function move_to_pre(x::Human)
+    θ = (0.8, 0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
+    x.health = PRE
+    x.tis = 0   # reset time in state 
+    x.exp = 1   # one day in presymptomatic
+    if rand() < θ[x.ag]
+        if rand() < p.fasymp 
+            x.swap = ASYMP
+        else 
+            x.swap = MILD 
+        end        
+    else 
+        x.swap = INF
+    end
+    x.iso = false # starting at latent, person is not isolated from the community   
+    x.icu = false # reset the icu so it dosn't pop up as a bug later.
+end
+export move_to_pre
+
+function move_to_asymp(x::Human)
+     ## transfers human h to the asymptomatic stage 
+     γ = 5 
+     x.health = ASYMP     
+     x.tis = 0 
+     x.exp = γ
+     x.swap = REC 
+     x.iso = false
+end
+export move_to_asymp
 
 function move_to_mild(x::Human)
     ## transfers human h to the mild infection stage for γ days
@@ -295,23 +350,32 @@ function move_to_miso(x::Human)
 end
 export move_to_miso
 
-function move_to_inf(x::Human)
-    ## transfers human h to the mild isolated infection stage for γ days
-    ## for swap, check if person will be hospitalized, selfiso, or recover
-    ## if changing this function, also check if insert_infected needs to be changed. 
+function move_to_infsimple(x::Human)
+    ## transfers human h to the severe infection stage for γ days 
+    ## simplified function for calibration/general purposes
+    x.health = INF
+    x.swap = REC
+    x.tis = 0 
+    x.iso = false 
+    x.exp = 5  ## change if needed.  
+    if rand() < p.fsevere    
+        x.exp = 1  ## 1 day isolation for severe cases     
+        x.swap = IISO
+    end          
+end
 
+function move_to_inf(x::Human)
+    ## transfers human h to the severe infection stage for γ days
+    ## for swap, check if person will be hospitalized, selfiso, die, or recover
+ 
     # h = prob of hospital, c = prob of icu AFTER hospital    
     h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
     c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
+    mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]     # death rate for severe cases.
      
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
 
-    # death rate for severe cases.
-    mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]
-
-    #mh = [0.01*3, 0.01*3, 0.0135*2, 0.01225, 0.03*2]
-    
     x.health = INF
     x.swap = UNDEF
     x.tis = 0 
@@ -411,7 +475,7 @@ function move_to_recovered(h::Human)
 end
 
 function dyntrans()
-    infs = findall(x -> x.health in (INF, MILD, MISO, IISO), humans)
+    infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
     # if p.calibration 
     #     length(infs) > 1 && error("more than one infected person: length: $(length(infs))")
     # end
@@ -445,7 +509,7 @@ function dyntrans()
                 for j in meet
                     y = humans[j]
                     bf = p.β
-                    if (x.health == MILD || x.health == MISO)
+                    if (x.health == PRE || x.health == ASYMP || x.health == MILD || x.health == MISO)
                         bf = bf * (1 - 0.5)  ## reduction factor 0.5
                     end
                     if y.health == SUS && rand() < bf

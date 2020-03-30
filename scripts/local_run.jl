@@ -57,9 +57,9 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
 
     ## save at the simulation and time level
-    ## to ignore for now: miso, iiso, mild, ded
-    c1 = Symbol.((:LAT, :INF, :HOS, :ICU, :DED), :_INC)
-    c2 = Symbol.((:LAT, :INF, :HOS, :ICU, :DED), :_PREV)
+    ## to ignore for now: miso, iiso, mild 
+    c1 = Symbol.((:LAT, :ASYMP, :INF, :HOS, :ICU, :DED), :_INC)
+    c2 = Symbol.((:LAT, :ASYMP, :INF, :HOS, :ICU, :DED), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
@@ -81,6 +81,8 @@ function compute_yearly_average(df)
     ya = df |> @groupby(_.time) |> @map({time=key(_), cnt=length(_),
               sus_prev=mean(_.SUS_PREV), 
               lat_prev=mean(_.LAT_PREV), 
+              pre_prev=mean(_.PRE_PREV), 
+              asymp_prev=mean(_.ASYMP_PREV), 
               mild_prev=mean(_.MILD_PREV), 
               miso_prev=mean(_.MISO_PREV), 
               inf_prev=mean(_.INF_PREV), 
@@ -91,6 +93,8 @@ function compute_yearly_average(df)
               ded_prev=mean(_.DED_PREV), 
               sus_inc=mean(_.SUS_INC),
               lat_inc=mean(_.LAT_INC), 
+              pre_inc=mean(_.PRE_INC), 
+              asymp_inc=mean(_.ASYMP_INC), 
               mild_inc=mean(_.MILD_INC), 
               miso_inc=mean(_.MISO_INC), 
               inf_inc=mean(_.INF_INC),
@@ -103,101 +107,38 @@ function compute_yearly_average(df)
     return ya
 end
 
-function run_ny_scenario()
+function run_scenarios()
     myp = covid19abm.ModelParameters()
     nsims = 500
     start = time()
     
-    myp.β = 0.0485 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
-    myp.fsevere = 0 
-    _calibrate(0.0485, 1000, myp)
-    myp.prov = :newyork 
-
+    myp.β = 0.0425 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
+    myp.prov = :ontario
+    calibrate(myp.β, 500)
+     
     ## scenario 1: no isolation, no quarantine of individuals
     myp.fsevere = 0
     myp.fmild = 0 
     myp.τmild = 0  
-    myp.eldq = 0    
+    myp.eldq = 0   
+    myp.fpre = 0  
+    myp.fasymp = 0
     prefix = savestr(myp)
     println("$prefix")
     run(myp, 500, prefix)
     
     ## scenario 2: 50% self-isolation, no quarantine of individuals
-    myp.fsevere = 0.50
-    myp.fmild = 0.50 
-    myp.τmild = 1
-    myp.eldq = 0  
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
-
-    ## scenario 3: 50% self-isolation, + 90% of 60+ quarantine. 
-    myp.fsevere = 0.50
-    myp.fmild = 0.50 
-    myp.τmild = 1
-    myp.eldq = 0.90         
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
-
-    ## scenario 4: 50% self-isolation, + 90% of 60+ quarantine. 
     myp.fsevere = 0.0
-    myp.fmild = 0.0 
+    myp.fmild = 0.0
     myp.τmild = 0
-    myp.eldq = 0.90         
+    myp.eldq = 0  
+    myp.fpre = 0.5
+    myp.fasymp = 0.5
     prefix = savestr(myp)
     println("$prefix")
     run(myp, 500, prefix)
-
-    # fs = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
-    # for f in fs 
-    #     myp.τmild  = 1
-    #     myp.fmild = f
-    #     myp.fsevere = f       
-    #     _calibrate(0.0485, 5000, myp)         
-    #     myp.calibration = false
-    #     prefix = savestr(myp)
-    #     run(myp, 500, prefix)
-    # end
     println("done newyork")
 end
-
-function run_scenarios()
-    myp = covid19abm.ModelParameters()
-    start = time()
-    #betas=[0.0365, 0.0455]
-    #prov = [:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
-    betas = [0.0485]
-    prov = [:newyork]
-    #fs = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90)
-    #τs = (1, 2)
-    fs = (0.80)
-    τs = (1)      
-    ts = length(betas) * length(fs) * length(τs) 
-    nsims = 500
-    
-    for p in prov, r in betas
-        myp.β = r
-        myp.prov = p        
-        ## run with no isolation
-        myp.fsevere = 0
-        myp.fmild = 0 
-        myp.τmild = 0                 
-        prefix = savestr(myp)
-        run(myp, 500, prefix)
-        
-        ## run with isolation 
-        for f in fs, τ in τs    
-            myp.τmild  = τ
-            myp.fmild = f            
-            prefix = savestr(myp)
-            run(myp, 500, prefix)
-        end
-    end  
-    elapsed = time() - start
-    println("done, time: $elapsed")
-end
-
 
 function savestr(p::ModelParameters)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
@@ -207,58 +148,24 @@ function savestr(p::ModelParameters)
     rstr = replace(string(p.β), "." => "")
     prov = replace(string(p.prov), "." => "")
     eldr = replace(string(p.eldq), "." => "")
-    fldrname = "/data/covid19abm/simresults/$prov/b$rstr/tau$(taustr)_f$(fstr)_q$(eldr)/"
+    fpre = replace(string(p.fpre), "." => "")
+    fasymp = replace(string(p.fasymp), "." => "")
+    fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)/"
     mkpath(fldrname)
 end
 
-function findr0(beta, fval, nsims, prov=:ontario)
-    myp = ModelParameters()
-    myp.β = beta
-    myp.prov = prov
-    myp.fsevere = fval 
-    myp.calibration = true
-    vals = zeros(Int64, nsims)
-    println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
-    cd = pmap(1:nsims) do i 
-        h, ags = main(myp) ## gets the entire model. 
-        val = sum(_get_column_incidence(h, covid19abm.LAT))            
-        val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
-        return val
-    end
-    println("mean R0: $(mean(cd)) with std: $(std(cd))")
-    return cd
-end
 
-function nytest()
-    ## new york test for alison's NYC emails. 
-    ## here we fix beta and loop through isolation levels to see which isolation level pushes R0 below one.
-    nsims = 5000
-    reps = [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9]
-    means = zeros(Float64, nsims, length(reps))   
-    for i = 1:length(reps)
-        iso = reps[i]
-        println("iter: $iso")
-        mval = findr0(0.0485, iso, 5000, :newyork)         
-        means[:, i] .= mval
-    end
-    return means
-end
-
-function _calibrate(beta, nsims, myp::ModelParameters)
+function _calibrate(nsims, myp::ModelParameters)
     println("turning calibration on")
-    myp.calibration = true
+    myp.calibration != true && error("calibration parameter not turned on")
     vals = zeros(Int64, nsims)
     println("calibrating with beta: $(myp.β), total sims: $nsims, province: $(myp.prov)")
     cd = pmap(1:nsims) do i 
         h, ags = main(myp) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
-        val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
         return val
     end
-    println("mean R0: $(mean(cd)) with std: $(std(cd))")
-    println("turning calibration on")
-    myp.calibration = false    
-    return mean(cd)
+    return mean(cd), std(cd)
 end
 
 function calibrate(beta, nsims, prov=:ontario)
@@ -267,16 +174,10 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.prov = prov
     myp.calibration = true
     myp.fsevere = 0.0
-    vals = zeros(Int64, nsims)
-    println("calibrating with beta: $beta, total sims: $nsims, province: $prov")
-    cd = pmap(1:nsims) do i 
-        h, ags = main(myp) ## gets the entire model. 
-        val = sum(_get_column_incidence(h, covid19abm.LAT))            
-        val = val - 1 ## minus becuase the initial latent guy ends up in latent by the end cuz of swapupdate()
-        return val
-    end
-    println("mean R0: $(mean(cd)) with std: $(std(cd))")
-    return mean(cd)
+    m, sd = _calibrate(nsims, myp)
+    println("mean R0: $(m) with std: $(sd)")
+    myp.calibration = false       
+    return m
 end
 
 function calibrate_robustness(beta, prov=:ontario)
