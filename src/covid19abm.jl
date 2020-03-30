@@ -51,7 +51,6 @@ function main(ip::ModelParameters)
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
-        # TO DO: checks whether mild, severe, and eldq parameters are set properly. 
         swapupdate = time_update_cal
         insert_infected(1, 4)  ## function will never isolation nor put in hospital/icu 
     else 
@@ -80,7 +79,7 @@ function reset_params(ip::ModelParameters)
         setfield!(p, x, getfield(ip, x))
     end
 end
-export reset_params
+export reset_params, reset_params_default
 
 ## Data Collection/ Model State functions
 function _get_model_state(st, hmatrix)
@@ -155,7 +154,6 @@ export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_p
 
 ## initialization functions 
 function get_province_ag(prov) 
-    println("new func")
     ret = @match prov begin        
         :alberta => Distributions.Categorical(@SVector [0.0655, 0.1851, 0.4331, 0.1933, 0.1230])
         :bc => Distributions.Categorical(@SVector [0.0475, 0.1570, 0.3905, 0.2223, 0.1827])
