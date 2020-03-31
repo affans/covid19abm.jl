@@ -7,6 +7,7 @@ using Statistics
 using UnicodePlots
 using ClusterManagers
 using Dates
+using Printf
 
 ## load the packages by covid19abm
 using Parameters, Distributions, StatsBase, StaticArrays, Random, Match, DataFrames
@@ -112,41 +113,49 @@ function run_scenarios()
     nsims = 500
     start = time()    
     myp.β = 0.0425 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
-    myp.prov = :ontario
-    calibrate(myp.β, 500)     
-    ## scenario 1: baseline no isolation, no quarantine of individuals, 100% presymptpomatic 
-    myp.fsevere = 0
-    myp.fmild = 0 
-    myp.τmild = 0  
-    myp.eldq = 0   
-    myp.fpre = 1.0
-    myp.fasymp = 0
-    myp.fpreiso = 0
+    myp.prov = :locB
+    calibrate(myp.β, 500, :locB)
+    ## scenario baseline: no isolation, no pre, no asymp, no quarantine of individuals 
+    myp.fsevere = 0.0
+    myp.fmild = 0.0
+    myp.τmild = 0
+    myp.eldq = 0.0  
+    myp.fpre = 0.0
+    myp.fasymp = 0.0
     prefix = savestr(myp)
     println("$prefix")
     run(myp, 500, prefix)
-    preisos = (0, 0.10, 0.20, 0.30, 0.40, 0.50)
-    for pi in preisos 
-        ## scenario 2: baseline no isolation, with asymptomatic, no pre isolation
-        myp.fsevere = 0
-        myp.fmild = 0 
-        myp.τmild = 0  
-        myp.eldq = 0   
+    ## scenario no isolation, with presymptomatic and asymptomatic
+    asymps = (0.0, 0.25, 0.50)
+    for as in asymps 
+        ## scenario 2: 50% self-isolation, no quarantine of individuals
         myp.fpre = 1.0
-        myp.fasymp = 0.5
-        myp.fpreiso = pi
+        myp.fasymp = as
         prefix = savestr(myp)
         println("$prefix")
-        run(myp, 500, prefix)  
+        run(myp, 500, prefix)
+    end
+    ## scenario with isolation, with presymptomatic and asymptomatic
+    milds = (0.20, 0.40, 0.60, 0.80)
+    asymps = (0.0, 0.25, 0.50)
+    for mm in milds, as in asymps 
+        ## scenario 2: 50% self-isolation, no quarantine of individuals
+        myp.fsevere = 0.80
+        myp.fmild = mm
+        myp.τmild = 1
+        myp.fpre = 1.0
+        myp.fasymp = as
+        prefix = savestr(myp)
+        println("$prefix")
+        run(myp, 500, prefix)
     end
 end
 
 function savestr(p::ModelParameters)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
-    taustr = replace(string(p.τmild), "." => "")
-    fstr = replace(string(p.fmild), "." => "")
     rstr = replace(string(p.β), "." => "")
+<<<<<<< HEAD
     prov = replace(string(p.prov), "." => "")
     eldr = replace(string(p.eldq), "." => "")
     fpre = replace(string(p.fpre), "." => "")
@@ -154,6 +163,23 @@ function savestr(p::ModelParameters)
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+=======
+    prov = lowercase(string(p.prov))
+    
+    # 2 digit parameters
+    taustr = string(p.τmild)
+    fstr = SubString(replace(string(p.fmild*100), "." => ""), 1, 2)
+    eldr = SubString(replace(string(p.eldq*100), "." => ""), 1, 2)
+    fpre = SubString(replace(string(p.fpre*100), "." => ""), 1, 2)
+    fasymp = SubString(replace(string(p.fasymp*100), "." => ""), 1, 2)
+    # taustr = replace(string(p.τmild), "." => "")SubString(replace(string(p.τmild*100), "." => ""), 1, 2)
+    # fstr = replace(string(p.fmild), "." => "")    
+    # prov = replace(string(p.prov), "." => "")
+    # eldr = replace(string(p.eldq), "." => "")
+    # fpre = replace(string(p.fpre), "." => "")
+    # fasymp = replace(string(p.fasymp), "." => "")
+    fldrname = "/data/covid19abm/bhp/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)/"
+>>>>>>> added scenarios for engineering branch
     mkpath(fldrname)
 end
 

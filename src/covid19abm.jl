@@ -34,7 +34,7 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 10000
+const HSIZE = 8737
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
@@ -181,6 +181,8 @@ function get_province_ag(prov)
         :saskat => Distributions.Categorical(@SVector [0.0666, 0.1914, 0.3871, 0.1997, 0.1552])
         :yukon => Distributions.Categorical(@SVector [0.0597, 0.1694, 0.4179, 0.2343, 0.1187])
         :newyork   => Distributions.Categorical(@SVector [0.064000, 0.163000, 0.448000, 0.181000, 0.144000])
+        :locA => Distributions.Categorical(@SVector [0.0960705, 0.189034961, 0.527376481, 0.153279399, 0.034238659])
+        :locB => Distributions.Categorical(@SVector [0.112039368, 0.226482033, 0.512817578, 0.128747997, 0.019913024])
         _ => error("shame for not knowing your canadian provinces and territories")
     end       
     return ret  
