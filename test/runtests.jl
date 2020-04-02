@@ -58,11 +58,11 @@ end
     initialize() # reset population
     insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
-    ## check if the initial infected person is IISO 
+    ## check if the initial infected person is REC (since simpleinf function only puts them to REC)
     cv.p.fsevere = 1.0 
     initialize() # reset population
     insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
-    @test length(findall(x -> x.health == cv.INF && x.swap == cv.IISO, cv.humans)) == 1
+    @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
 end
 
 @testset "transitions" begin
@@ -102,6 +102,67 @@ end
     end
 
     # to do: check each compartment separately.
+    # CHECKING LATENT
+    initialize()
+    x = humans[1]
+    x.ag = 1 ## move to the first age group manually.
+    myp = cv.ModelParameters()   
+    myp.fpre = 0.0  ## turn off presymptomatic 
+    cv.reset_params(myp)
+    move_to_latent(x)
+    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
+    @test x.iso == false
+
+    myp.fpre = 1.0  ## turn on presymptomatic 
+    cv.reset_params(myp)
+    move_to_latent(x)
+    @test x.swap == cv.PRE
+    @test x.iso == false # isolation should not be turned on in latent at all.
+
+    myp.fpre = 0.0  ## turn off presymptomatic but turn on asymp 
+    myp.fasymp = 1.0
+    cv.reset_params(myp)
+    move_to_latent(x)
+    @test x.swap ∈ (cv.ASYMP, cv.INF)
+    @test x.iso == false
+
+    # CHECKING PRE
+    initialize()
+    x = humans[1]
+    myp.fpreiso = 1.0
+    cv.reset_params(myp)
+    move_to_pre(x) 
+    @test x.health == cv.PRE 
+    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
+    @test x.iso == true ## most important test
+
+    myp.fpreiso = 0.0
+    cv.reset_params(myp)
+    move_to_pre(x) 
+    @test x.health == cv.PRE 
+    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
+    @test x.iso == false ## most important test
+
+    ## check if individual moves through mild, miso through fmild, tmild parameters
+    initialize()
+    x = humans[1]
+    x.ag = 1 ## move to the first age group manually.
+    x.iso = false ## turn this off so we can test the effect of fmild, tmild
+    myp.fmild = 0.0
+    cv.reset_params(myp)
+    move_to_mild(x)
+    @test x.swap == cv.REC
+
+    myp.fmild = 1.0
+    myp.τmild = 1
+    cv.reset_params(myp)
+    move_to_mild(x)
+    @test x.swap == cv.MISO
+    @test x.exp == 1
+    
+    time_update() 
+    @test x.health == cv.MISO
+    @test x.swap == cv.REC
     # to do: follow the movement of a single human
 end
 

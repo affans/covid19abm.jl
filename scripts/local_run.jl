@@ -55,7 +55,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     ag4 = vcat([cd[i].g4 for i = 1:nsims]...)
     ag5 = vcat([cd[i].g5 for i = 1:nsims]...)
     mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
-
+    
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
     c1 = Symbol.((:LAT, :ASYMP, :INF, :HOS, :ICU, :DED), :_INC)
@@ -110,34 +110,35 @@ end
 function run_scenarios()
     myp = covid19abm.ModelParameters()
     nsims = 500
-    start = time()
-    
+    start = time()    
     myp.β = 0.0425 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
     myp.prov = :ontario
-    calibrate(myp.β, 500)
-     
-    ## scenario 1: no isolation, no quarantine of individuals
+    calibrate(myp.β, 500)     
+    ## scenario 1: baseline no isolation, no quarantine of individuals, 100% presymptpomatic 
     myp.fsevere = 0
     myp.fmild = 0 
     myp.τmild = 0  
     myp.eldq = 0   
-    myp.fpre = 0  
+    myp.fpre = 1.0
     myp.fasymp = 0
+    myp.fpreiso = 0
     prefix = savestr(myp)
     println("$prefix")
     run(myp, 500, prefix)
-    
-    ## scenario 2: 50% self-isolation, no quarantine of individuals
-    myp.fsevere = 0.0
-    myp.fmild = 0.0
-    myp.τmild = 0
-    myp.eldq = 0  
-    myp.fpre = 0.5
-    myp.fasymp = 0.5
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
-    println("done newyork")
+    preisos = (0, 0.10, 0.20, 0.30, 0.40, 0.50)
+    for pi in preisos 
+        ## scenario 2: baseline no isolation, with asymptomatic, no pre isolation
+        myp.fsevere = 0
+        myp.fmild = 0 
+        myp.τmild = 0  
+        myp.eldq = 0   
+        myp.fpre = 1.0
+        myp.fasymp = 0.5
+        myp.fpreiso = pi
+        prefix = savestr(myp)
+        println("$prefix")
+        run(myp, 500, prefix)  
+    end
 end
 
 function savestr(p::ModelParameters)
@@ -150,16 +151,18 @@ function savestr(p::ModelParameters)
     eldr = replace(string(p.eldq), "." => "")
     fpre = replace(string(p.fpre), "." => "")
     fasymp = replace(string(p.fasymp), "." => "")
-    fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)/"
+    fpreiso = replace(string(p.fpreiso), "." => "")
+    fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 
 
 function _calibrate(nsims, myp::ModelParameters)
-    println("turning calibration on")
     myp.calibration != true && error("calibration parameter not turned on")
     vals = zeros(Int64, nsims)
     println("calibrating with beta: $(myp.β), total sims: $nsims, province: $(myp.prov)")
+    println("calibration parameters:")
+    dump(myp)
     cd = pmap(1:nsims) do i 
         h, ags = main(myp) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
@@ -174,6 +177,7 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.prov = prov
     myp.calibration = true
     myp.fsevere = 0.0
+    myp.fpreiso = 0.0
     m, sd = _calibrate(nsims, myp)
     println("mean R0: $(m) with std: $(sd)")
     myp.calibration = false       

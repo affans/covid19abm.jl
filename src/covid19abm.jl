@@ -11,7 +11,7 @@ Base.@kwdef mutable struct Human
     ag::Int64    = 0
     tis::Int64   = 0   # time in state 
     exp::Int64   = 0    # max statetime
-    iso::Bool = false  ## isolation
+    iso::Bool = false  ## isolated (limited contacts)
     icu::Bool = false ## is going to be in icu?
 end
 
@@ -25,6 +25,7 @@ end
     eldq::Float64 = 0.0 ## complete isolation of elderly
     fasymp::Float64 = 0.50 ## percent going to asymp
     fpre::Float64 = 0.50 ## percent going to presymptomatic
+    fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     calibration::Bool = false 
     modeltime::Int64 = 500    
 end
@@ -287,7 +288,7 @@ function move_to_latent(x::Human)
         end
         x.exp = Int(round(rand(σ)))
     end
-    
+    x.iso == true && error("how did isolated person become infected")
     x.iso = false # starting at latent, person is not isolated from the community   
     x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
@@ -298,6 +299,16 @@ function move_to_pre(x::Human)
     x.health = PRE
     x.tis = 0   # reset time in state 
     x.exp = 1   # one day in presymptomatic
+
+    # calculate whether person is isolated
+    if rand() < p.fpreiso
+        x.iso = true # starting at latent, person is not isolated from the community   
+    else 
+        x.iso = false
+    end    
+
+    # the reason why we can't move to MILD/MISO and INF/IISO here is that, 
+    # particularly, for inf we need to check for hospitalization
     if rand() < θ[x.ag]
         if rand() < p.fasymp 
             x.swap = ASYMP
@@ -307,8 +318,7 @@ function move_to_pre(x::Human)
     else 
         x.swap = INF
     end
-    x.iso = false # starting at latent, person is not isolated from the community   
-    x.icu = false # reset the icu so it dosn't pop up as a bug later.
+
 end
 export move_to_pre
 
@@ -319,7 +329,8 @@ function move_to_asymp(x::Human)
      x.tis = 0 
      x.exp = γ
      x.swap = REC 
-     x.iso = false
+     # x.iso property remains from either the latent or presymptomatic class
+     # if x.iso is true, the asymptomatic individual has limited contacts
 end
 export move_to_asymp
 
@@ -330,8 +341,13 @@ function move_to_mild(x::Human)
     x.tis = 0 
     x.exp = γ
     x.swap = REC 
-    x.iso = false
-    if rand() < p.fmild 
+    # x.iso property remains from either the latent or presymptomatic class
+    # if x.iso is true, staying in MILD is same as MISO since contacts will be limited. 
+    # we still need the separation of MILD, MISO because if x.iso is false, then here we have to determine 
+    # how many days as full contacts before self-isolation
+    # NOTE: if need to count non-isolated mild people, this is overestimate as isolated people should really be in MISO all the time
+    #   and not go through the mild compartment 
+    if x.iso || rand() < p.fmild
         x.swap = MISO  
         x.exp = p.τmild
     end
@@ -346,7 +362,7 @@ function move_to_miso(x::Human)
     x.swap = REC
     x.tis = 0 
     x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious but it dosn't really matter
-    x.iso = true  ## self isolated from the community
+    x.iso = true  ## isolated from the community ... may already be set from before. still need it here if not set before
 end
 export move_to_miso
 
@@ -357,11 +373,7 @@ function move_to_infsimple(x::Human)
     x.swap = REC
     x.tis = 0 
     x.iso = false 
-    x.exp = 5  ## change if needed.  
-    if rand() < p.fsevere    
-        x.exp = 1  ## 1 day isolation for severe cases     
-        x.swap = IISO
-    end          
+    x.exp = 5  ## change if needed.   
 end
 
 function move_to_inf(x::Human)
@@ -379,20 +391,17 @@ function move_to_inf(x::Human)
     x.health = INF
     x.swap = UNDEF
     x.tis = 0 
-    x.iso = false # person is not isolated while infectious. 
     if rand() < h[x.ag]     # going to hospital or ICU but will spend delta time transmissing the disease with full contacts 
         x.exp = δ     
         x.swap = rand() < c[x.ag] ? ICU : HOS        
     else ## no hospital for this lucky (but severe) individual 
         if rand() < mh[x.ag]
+            x.exp = γ   
             x.swap = DED
-            x.iso = true  ## self isolated
-            x.tis = 0     ## reset time in state 
-            x.exp = γ   ## since tau amount of days was already spent as infectious 
         else 
             x.exp = γ  # as in the other functions.  
             x.swap = REC
-            if rand() < p.fsevere 
+            if x.iso || rand() < p.fsevere 
                 x.exp = 1  ## 1 day isolation for severe cases     
                 x.swap = IISO
             end  
@@ -408,7 +417,7 @@ function move_to_iiso(x::Human)
     oldexp = x.exp
     x.health = IISO   
     x.swap = REC
-    x.iso = true  ## self isolated
+    x.iso = true  ## isolated from the community ... may already be set from before.
     x.tis = 0     ## reset time in state 
     x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious 
 end 
@@ -475,19 +484,17 @@ function move_to_recovered(h::Human)
 end
 
 function dyntrans()
+    totalinf = 0 # ctr for total infections on day. 
+    ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
-    # if p.calibration 
-    #     length(infs) > 1 && error("more than one infected person: length: $(length(infs))")
-    # end
-    totalinf = 0
-    tomeet = map(1:length(agebraks)) do grp
-        findall(x -> x.iso == false && x.ag == grp , humans)    
+    tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
+        findall(x -> x.ag == grp , humans)    
     end
     #length(tomeet) <= 5 && return totalinf
     for xid in infs
         x = humans[xid]
         ag = x.ag   
-        if (x.health == MISO || x.health == IISO)
+        if x.iso ## isolated infectious person has limited contacts
             cnt = rand(1:3)
         else 
             cnt = rand(nbs[ag])  ## get number of contacts/day
