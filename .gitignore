@@ -5,3 +5,4 @@
 *.dat
 *.out
 simresults
+scratch.jl
