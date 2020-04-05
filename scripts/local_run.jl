@@ -65,7 +65,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
         # simulation level, save file per health status, per age group
         for c in vcat(c1..., c2...)
             udf = unstack(df, :time, :sim, c) 
-            fn = (lowercase(string("$(folderprefix)/simlevel_", c, "_", k, ".dat")))
+            fn = string("$(folderprefix)/simlevel_", lowercase(string(c)), "_", k, ".dat")
             CSV.write(fn, udf)
         end
         println("saving dataframe time level: $k")
