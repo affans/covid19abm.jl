@@ -26,8 +26,9 @@ end
     fasymp::Float64 = 0.50 ## percent going to asymp
     fpre::Float64 = 0.50 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
+    tpreiso::Int64 = 1 ## preiso is only turned on at this time. 
     calibration::Bool = false 
-    modeltime::Int64 = 500    
+    modeltime::Int64 = 500
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -58,12 +59,19 @@ function main(ip::ModelParameters)
         insert_infected(PRE, 1, 4)
     else 
         swapupdate = time_update
-        insert_infected(INF, 5, 4)  
+        insert_infected(LAT, 2, 4)  
     end    
     
+    ## save the preisolation isolation parameters
+    _fpreiso = p.fpreiso
+    p.fpreiso = 0
+
     # start the time loop
     for st = 1:p.modeltime
         # start of day
+        if st == p.tpreiso ## time to introduce testing
+            p.fpreiso = _fpreiso
+        end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
         totalinf = dyntrans()
         sw = swapupdate()
@@ -210,6 +218,8 @@ function insert_infected(health, num, ag)
                 if p.calibration ## if calibration is on, the initial person will always swap to SIMPLE INF
                     x.swap = INF
                 end
+            elseif health == LAT 
+                move_to_latent(x)
             elseif health == INF
                 move_to_infsimple(x)
             else 
@@ -515,9 +525,14 @@ function dyntrans()
             
                 for j in meet
                     y = humans[j]
-                    bf = p.β
-                    if (x.health == PRE || x.health == ASYMP || x.health == MILD || x.health == MISO)
-                        bf = bf * (1 - 0.5)  ## reduction factor 0.5
+                    bf = p.β ## baseline PRE
+                    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
+                    if x.health == ASYMP
+                        bf = bf * 0.11
+                    elseif x.health == MILD || x.health == MISO 
+                        bf = bf * 0.44
+                    elseif x.health == INF || x.health == IISO 
+                        bf = bf * 0.89
                     end
                     if y.health == SUS && rand() < bf
                         totalinf += 1

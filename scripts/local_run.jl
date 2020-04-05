@@ -152,7 +152,8 @@ function savestr(p::ModelParameters)
     fpre = replace(string(p.fpre), "." => "")
     fasymp = replace(string(p.fasymp), "." => "")
     fpreiso = replace(string(p.fpreiso), "." => "")
-    fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_preiso$(fpreiso)/"
+    tpreiso = replace(string(p.tpreiso), "." => "")
+    fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 
