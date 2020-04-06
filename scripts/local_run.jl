@@ -55,7 +55,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     ag3 = vcat([cd[i].g3 for i = 1:nsims]...)
     ag4 = vcat([cd[i].g4 for i = 1:nsims]...)
     ag5 = vcat([cd[i].g5 for i = 1:nsims]...)
-    mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
+    mydfs = Dict("all" => all)
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
@@ -113,9 +113,10 @@ function run_scenarios()
     nsims = 500
     start = time()    
     myp.β = 0.0425 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
+    
+    ## scenario model baseline: no isolation, no pre, no asymp, no quarantine of individuals 
     myp.prov = :locA
     calibrate(myp.β, 500, :locA)
-    ## scenario model baseline: no isolation, no pre, no asymp, no quarantine of individuals 
     myp.τmild = 0
     myp.fmild = 0.0
     myp.fsevere = 0.0
@@ -151,7 +152,7 @@ function run_scenarios()
     myp.τmild = 0
     myp.fmild = 0
     myp.tpreiso = 1 
-    pres = (0.20, 0.40, 0.60, 0.80)
+    pres = (0.10, 0.20, 0.30, 0.40)
     for pi in pres
         myp.fpreiso = pi
         prefix = savestr(myp)
@@ -165,14 +166,15 @@ function run_scenarios()
     myp.fmild = 0
     myp.tpreiso = 1 
     myp.τmild = 1
-    pres = (0.20, 0.40, 0.60, 0.80)
-    for pi in pres
-        myp.fpreiso = pi
-        myp.fmild = pi
+    milds = (0.20, 0.40, 0.60, 0.80)
+    pres = (0.10, 0.20, 0.30, 0.40)
+    for (mi, pi) in zip(milds, pres)
+        myp.fmild = mi
+        myp.fpreiso = pi            
         prefix = savestr(myp)
         println("$prefix")
         run(myp, 500, prefix)
-    end
+    end    
 end
 
 function savestr(p::ModelParameters)
@@ -187,7 +189,7 @@ function savestr(p::ModelParameters)
     fasymp = replace(string(p.fasymp), "." => "")
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
-    fldrname = "/data/covid19abm/simresults/b$rstr/$prov/tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fldrname = "/data/covid19abm/simresults/$(prov)_tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 
