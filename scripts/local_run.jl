@@ -108,6 +108,14 @@ function compute_yearly_average(df)
     return ya
 end
 
+function compute_quantiles(df)
+    ya = df |> @groupby(_.time) |> @map({time=key(_), cnt=length(_),
+        sus_prev_qlow=quantile(_.LAT_PREV, 0.025),
+        sus_prev_qhi=quantile(_.LAT_PREV, 0.95)
+        }) |> DataFrame
+    error("not implemented")
+end
+
 function savestr(p::ModelParameters)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
