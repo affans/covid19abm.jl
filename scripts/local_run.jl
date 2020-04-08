@@ -55,7 +55,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     ag3 = vcat([cd[i].g3 for i = 1:nsims]...)
     ag4 = vcat([cd[i].g4 for i = 1:nsims]...)
     ag5 = vcat([cd[i].g5 for i = 1:nsims]...)
-    mydfs = Dict("all" => all)
+    mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
@@ -115,8 +115,8 @@ function run_scenarios()
     myp.β = 0.0425 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
     
     ## scenario model baseline: no isolation, no pre, no asymp, no quarantine of individuals 
-    myp.prov = :locA
-    calibrate(myp.β, 500, :locA)
+    myp.prov = :locB
+    calibrate(myp.β, 500, :locB)
     myp.τmild = 0
     myp.fmild = 0.0
     myp.fsevere = 0.0

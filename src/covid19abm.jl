@@ -34,7 +34,7 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 8737
+const HSIZE = 8737 # locA: 13844, locB: 8737
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
@@ -59,7 +59,7 @@ function main(ip::ModelParameters)
         insert_infected(PRE, 1, 4)
     else 
         swapupdate = time_update
-        insert_infected(LAT, 2, 4)  
+        insert_infected(LAT, 5, 4)  
     end    
     
     ## save the preisolation isolation parameters
