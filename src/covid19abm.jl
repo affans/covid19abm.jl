@@ -55,10 +55,8 @@ function main(ip::ModelParameters)
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
-        swapupdate = time_update_cal
         insert_infected(PRE, 1, 4)
     else 
-        swapupdate = time_update
         insert_infected(LAT, 2, 4)  
     end    
     
@@ -74,7 +72,7 @@ function main(ip::ModelParameters)
         end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
         totalinf = dyntrans()
-        sw = swapupdate()
+        sw = time_update()
         # end of day
     end
     return hmatrix, ags ## return the model state as well as the age groups. 
@@ -215,9 +213,9 @@ function insert_infected(health, num, ag)
             x = humans[i]
             if health == PRE 
                 move_to_pre(x) ## the swap may be asymp, mild, or severe, but we can force severe in the time_update function
-                if p.calibration ## if calibration is on, the initial person will always swap to SIMPLE INF
-                    x.swap = INF
-                end
+                # if p.calibration ## if calibration is on, the initial person will always swap to SIMPLE INF
+                #     x.swap = INF
+                # end
             elseif health == LAT 
                 move_to_latent(x)
             elseif health == INF
@@ -255,25 +253,7 @@ function time_update()
     end
     return (lat, mild, miso, inf, infiso, hos, icu, rec, ded)
 end
-
-function time_update_cal()
-    ## calibration specific time_update function 
-    ## keeps everyone in latent (so that we can count the number of secondary infections)
-    a = 0
-    for x in humans 
-        x.tis += 1 
-        if x.tis >= x.exp 
-            @match Symbol(x.swap) begin
-                :LAT  => begin move_to_latent(x); x.swap = LAT; x.exp = 999 end
-                :INF  => begin move_to_infsimple(x); end    
-                :REC  => begin move_to_recovered(x); end
-                _    => error("swap expired, but no swap set.")
-            end
-        end
-    end
-    return a
-end
-export time_update, time_update_cal
+export time_update
 
 function move_to_latent(x::Human)
     ## transfers human h to the incubation period and samples the duration
@@ -297,6 +277,10 @@ function move_to_latent(x::Human)
             x.swap = INF
         end
         x.exp = Int(round(rand(σ)))
+    end
+    if p.calibration ## in calibration mode, latent people never become infectious.
+        x.swap = LAT 
+        x.exp = 999
     end
     x.iso == true && error("how did isolated person become infected")
     x.iso = false # starting at latent, person is not isolated from the community   
@@ -394,7 +378,13 @@ function move_to_inf(x::Human)
     h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
     c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
     mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]     # death rate for severe cases.
-     
+    
+    if p.calibration
+        h =  (0, 0, 0, 0)
+        c =  (0, 0, 0, 0)
+        mh = (0, 0, 0, 0)
+    end
+
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
     γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
 
