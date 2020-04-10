@@ -24,7 +24,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     dump(myp)
     myp.calibration && error("can not run simulation, calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
-    cd = pmap(1:nsims) do x                 
+    cdr = pmap(1:nsims) do x                 
         hmatrix, ags = main(myp)        
         all = _collectdf(hmatrix)
         spl = _splitstate(hmatrix, ags)
@@ -38,24 +38,24 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
 
     # add the simulation/time column for index purposes.
     for i = 1:nsims
-         dts = cd[i]
+         dts = cdr[i]
          for dt in dts 
             insertcols!(dt, 1, :sim => i)    
             insertcols!(dt, 1, :time => 1:myp.modeltime)
          end         
     end
     println("simulations finished")
-    println("total size of simulation dataframes: $(Base.summarysize(cd))")
+    println("total size of simulation dataframes: $(Base.summarysize(cdr))")
 
     ## stack the sims together
-    all = vcat([cd[i].a  for i = 1:nsims]...)
-    ag1 = vcat([cd[i].g1 for i = 1:nsims]...)
-    ag2 = vcat([cd[i].g2 for i = 1:nsims]...)
-    ag3 = vcat([cd[i].g3 for i = 1:nsims]...)
-    ag4 = vcat([cd[i].g4 for i = 1:nsims]...)
-    ag5 = vcat([cd[i].g5 for i = 1:nsims]...)
+    allag = vcat([cdr[i].a  for i = 1:nsims]...)
+    ag1 = vcat([cdr[i].g1 for i = 1:nsims]...)
+    ag2 = vcat([cdr[i].g2 for i = 1:nsims]...)
+    ag3 = vcat([cdr[i].g3 for i = 1:nsims]...)
+    ag4 = vcat([cdr[i].g4 for i = 1:nsims]...)
+    ag5 = vcat([cdr[i].g5 for i = 1:nsims]...)
     #mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
-    mydfs = Dict("all" => all)
+    mydfs = Dict("all" => allag)
 
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
@@ -71,9 +71,9 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
         end
         println("saving dataframe time level: $k")
         # time level, save file per age group
-        yaf = compute_yearly_average(df)
-        fn = string("$(folderprefix)/timelevel_", k, ".dat")        
-        CSV.write(fn, yaf)
+        yaf = compute_yearly_average(df)       
+        fn = string("$(folderprefix)/timelevel_", k, ".dat")   
+        CSV.write(fn, yaf)       
     end
     return mydfs
 end
@@ -108,13 +108,6 @@ function compute_yearly_average(df)
     return ya
 end
 
-function compute_quantiles(df)
-    ya = df |> @groupby(_.time) |> @map({time=key(_), cnt=length(_),
-        sus_prev_qlow=quantile(_.LAT_PREV, 0.025),
-        sus_prev_qhi=quantile(_.LAT_PREV, 0.95)
-        }) |> DataFrame
-    error("not implemented")
-end
 
 function savestr(p::ModelParameters)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
@@ -138,12 +131,12 @@ function _calibrate(nsims, myp::ModelParameters)
     println("calibrating with beta: $(myp.β), total sims: $nsims, province: $(myp.prov)")
     println("calibration parameters:")
     dump(myp)
-    cd = pmap(1:nsims) do i 
+    cdr = pmap(1:nsims) do i 
         h, ags = main(myp) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
         return val
     end
-    return mean(cd), std(cd)
+    return mean(cdr), std(cdr)
 end
 
 function calibrate(beta, nsims, prov=:ontario)
@@ -151,8 +144,10 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.β = beta
     myp.prov = prov
     myp.calibration = true
+    myp.fmild = 0.0 
     myp.fsevere = 0.0
     myp.fpreiso = 0.0
+    myp.fasymp = 0.5
     m, sd = _calibrate(nsims, myp)
     println("mean R0: $(m) with std: $(sd)")
     myp.calibration = false       
