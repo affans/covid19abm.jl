@@ -148,19 +148,19 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.fsevere = 0.0
     myp.fpreiso = 0.0
     myp.fasymp = 0.5
+    myp.initialinf = 1
     m, sd = _calibrate(nsims, myp)
     println("mean R0: $(m) with std: $(sd)")
     myp.calibration = false       
     return m
 end
 
-function calibrate_robustness(beta, prov=:ontario)
+function calibrate_robustness(beta, reps, prov=:ontario)
     #[:ontario, :alberta, :bc, :manitoba, :newbruns, :newfdland, :nwterrito, :novasco, :nunavut, :pei, :quebec, :saskat, :yukon]
     # once a beta is found based on nsims simulations, 
     # see how robust it is. run calibration with same beta 100 times 
     # to see the variation in R0 produced. 
-    nsims = [500, 1000, 2000]
-    reps = 5
+    nsims = [500, 1000]
     means = zeros(Float64, reps, length(nsims))
     for (i, ns) in enumerate(nsims)
         cd = map(1:reps) do x 

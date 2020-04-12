@@ -19,6 +19,9 @@ end
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0       
     prov::Symbol = :ontario 
+    calibration::Bool = false 
+    modeltime::Int64 = 500
+    initialinf::Int64 = 1
     τmild::Int64 = 1 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.05  ## percent of people practice self-isolation
     fsevere::Float64 = 0.80 # fixed at 0.80
@@ -27,8 +30,6 @@ end
     fpre::Float64 = 0.50 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 1 ## preiso is only turned on at this time. 
-    calibration::Bool = false 
-    modeltime::Int64 = 500
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -55,9 +56,9 @@ function main(ip::ModelParameters)
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
-        insert_infected(PRE, 1, 4)
+        insert_infected(PRE, p.initialinf, 4)
     else 
-        insert_infected(LAT, 2, 4)  
+        insert_infected(LAT, p.initialinf, 4)  
     end    
     
     ## save the preisolation isolation parameters
