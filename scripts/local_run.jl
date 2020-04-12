@@ -7,6 +7,7 @@ using Statistics
 using UnicodePlots
 using ClusterManagers
 using Dates
+using DelimitedFiles
 
 ## load the packages by covid19abm
 using Parameters, Distributions, StatsBase, StaticArrays, Random, Match, DataFrames
@@ -25,7 +26,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     myp.calibration && error("can not run simulation, calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
     cdr = pmap(1:nsims) do x                 
-        hmatrix, ags = main(myp)        
+        hmatrix, ags, infectors = main(myp)        
         all = _collectdf(hmatrix)
         spl = _splitstate(hmatrix, ags)
         ag1 = _collectdf(spl[1])
@@ -33,20 +34,18 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
         ag3 = _collectdf(spl[3])
         ag4 = _collectdf(spl[4])
         ag5 = _collectdf(spl[5])
-        return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5)
+        return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5, infectors=infectors)
     end    
 
-    # add the simulation/time column for index purposes.
     for i = 1:nsims
-         dts = cdr[i]
-         for dt in dts 
-            insertcols!(dt, 1, :sim => i)    
-            insertcols!(dt, 1, :time => 1:myp.modeltime)
-         end         
+        dts = cdr[i]
+        insertcols!(dts.a, 1, :sim => i); insertcols!(dts.g1, 1, :sim => i); insertcols!(dts.g2, 1, :sim => i); 
+        insertcols!(dts.g3, 1, :sim => i); insertcols!(dts.g4, 1, :sim => i); insertcols!(dts.g5, 1, :sim => i); 
     end
     println("simulations finished")
     println("total size of simulation dataframes: $(Base.summarysize(cdr))")
-
+    ## write the infectors 
+    writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
     ## stack the sims together
     allag = vcat([cdr[i].a  for i = 1:nsims]...)
     ag1 = vcat([cdr[i].g1 for i = 1:nsims]...)
@@ -56,7 +55,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     ag5 = vcat([cdr[i].g5 for i = 1:nsims]...)
     #mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
     mydfs = Dict("all" => allag)
-
+    
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
     c1 = Symbol.((:LAT, :ASYMP, :INF, :HOS, :ICU, :DED), :_INC)

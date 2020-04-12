@@ -7,6 +7,7 @@ Base.@kwdef mutable struct Human
     idx::Int64 = 0 
     health::HEALTH = SUS
     swap::HEALTH = UNDEF
+    sickfrom::HEALTH = UNDEF
     age::Int64   = 0    # in years. don't really need this but left it incase needed later
     ag::Int64    = 0
     tis::Int64   = 0   # time in state 
@@ -22,14 +23,14 @@ end
     calibration::Bool = false 
     modeltime::Int64 = 500
     initialinf::Int64 = 1
-    τmild::Int64 = 1 ## days before they self-isolate for mild cases
-    fmild::Float64 = 0.05  ## percent of people practice self-isolation
-    fsevere::Float64 = 0.80 # fixed at 0.80
+    τmild::Int64 = 0 ## days before they self-isolate for mild cases
+    fmild::Float64 = 0.0  ## percent of people practice self-isolation
+    fsevere::Float64 = 0.0 # fixed at 0.80
     eldq::Float64 = 0.0 ## complete isolation of elderly
     fasymp::Float64 = 0.50 ## percent going to asymp
-    fpre::Float64 = 0.50 ## percent going to presymptomatic
+    fpre::Float64 = 1.0 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
-    tpreiso::Int64 = 1 ## preiso is only turned on at this time. 
+    tpreiso::Int64 = 0## preiso is only turned on at this time. 
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -72,11 +73,14 @@ function main(ip::ModelParameters)
             p.fpreiso = _fpreiso
         end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        totalinf = dyntrans()
+        dyntrans()
         sw = time_update()
         # end of day
     end
-    return hmatrix, ags ## return the model state as well as the age groups. 
+
+    # get infectors counters
+    icounts = _count_infectors()
+    return hmatrix, ags, icounts ## return the model state as well as the age groups. 
 end
 export main
 
@@ -110,6 +114,7 @@ function _collectdf(hmatrix)
     _names_prev = Symbol.(string.((Symbol.(instances(HEALTH)[1:end - 1])), "_PREV"))
     _names = vcat(_names_inc..., _names_prev...)
     datf = DataFrame(mdf, _names)
+    insertcols!(datf, 1, :time => 1:p.modeltime) ## add a time column to the resulting dataframe
     return datf
 end
 
@@ -160,7 +165,27 @@ function _get_column_prevalence(hmatrix, hcol)
     end
     return timevec
 end
-export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence
+
+function _count_infectors()     
+    pre_ctr = asymp_ctr = mild_ctr = inf_ctr = 0
+    for x in humans 
+        if x.health != SUS ## meaning they got sick at some point
+            if x.sickfrom == PRE
+                pre_ctr += 1
+            elseif x.sickfrom == ASYMP
+                asymp_ctr += 1
+            elseif x.sickfrom == MILD || x.sickfrom == MISO 
+                mild_ctr += 1 
+            elseif x.sickfrom == INF || x.sickfrom == IISO 
+                inf_ctr += 1 
+            else 
+                error("sickfrom not set right: $(x.sickfrom)")
+            end
+        end
+    end
+    return (pre_ctr, asymp_ctr, mild_ctr, inf_ctr)
+end
+export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors
 
 ## initialization functions 
 function get_province_ag(prov) 
@@ -195,10 +220,8 @@ function initialize()
         x.ag = rand(agedist)
         x.age = rand(agebraks[x.ag]) 
         x.exp = 999  ## susceptible people don't expire.
-        if x.age >= 60  ## check if elderly need to be quarantined.
-            if rand() < p.eldq
-                x.iso = true
-            end            
+        if rand() < p.eldq && x.age >= 60  ## check if elderly need to be quarantined.
+            x.iso = true            
         end
     end
 end
@@ -214,16 +237,14 @@ function insert_infected(health, num, ag)
             x = humans[i]
             if health == PRE 
                 move_to_pre(x) ## the swap may be asymp, mild, or severe, but we can force severe in the time_update function
-                # if p.calibration ## if calibration is on, the initial person will always swap to SIMPLE INF
-                #     x.swap = INF
-                # end
             elseif health == LAT 
                 move_to_latent(x)
             elseif health == INF
                 move_to_infsimple(x)
             else 
                 error("can not insert human of health $(health)")
-            end            
+            end       
+            x.sickfrom = INF # this will add +1 to the INF count in _count_infectors()... keeps the logic simple in that function.    
         end
     end    
     return h
@@ -485,7 +506,7 @@ function move_to_recovered(h::Human)
 end
 
 function dyntrans()
-    totalinf = 0 # ctr for total infections on day. 
+    totalinf = 0
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
     tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
@@ -495,6 +516,7 @@ function dyntrans()
     for xid in infs
         x = humans[xid]
         ag = x.ag   
+        ih = x.health
         if x.iso ## isolated infectious person has limited contacts
             cnt = rand(1:3)
         else 
@@ -513,28 +535,31 @@ function dyntrans()
         for (i, g) in enumerate(gpw)
             if length(tomeet[i]) > 0 
                 meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
-            
+                ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
                 for j in meet
                     y = humans[j]
-                    bf = p.β ## baseline PRE
-                    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
-                    if x.health == ASYMP
-                        bf = bf * 0.11
-                    elseif x.health == MILD || x.health == MISO 
-                        bf = bf * 0.44
-                    elseif x.health == INF || x.health == IISO 
-                        bf = bf * 0.89
+                    if y.health == SUS && y.swap == UNDEF
+                        bf = p.β ## baseline PRE
+                        # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
+                        if ih == ASYMP
+                            bf = bf * 0.11
+                        elseif ih == MILD || ih == MISO 
+                            bf = bf * 0.44
+                        elseif ih == INF || ih == IISO 
+                            bf = bf * 0.89
+                        end
+                        if rand() < bf
+                            totalinf += 1
+                            y.swap = LAT
+                            y.exp = y.tis   ## force the move to latent in the next time step.
+                            y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
+                        end  
                     end
-                    if y.health == SUS && rand() < bf
-                        totalinf += 1
-                        y.swap = LAT
-                        y.exp = y.tis ## force the move to latent in the next time step.
-                    end  
                 end
             end            
         end
     end
-    return totalinf
+    return totalinf 
 end
 export dyntrans
 

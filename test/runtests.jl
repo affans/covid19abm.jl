@@ -44,6 +44,7 @@ end
         @test x.iso == false
         @test x.tis == 0
         @test x.exp == 999
+        @test x.sickfrom == cv.UNDEF
     end
     @test length(unique(ags)) == length(inmodel) # check if all age groups are sampled
     
@@ -190,10 +191,15 @@ end
 
 @testset "calibration" begin
     # to do, run the model and test total number of infections 
-    myp = cv.ModelParameters()
-    myp.calibration = true
-    myp.fsevere = 0.0
+    myp = ModelParameters()
     myp.β = 1.0
+    myp.prov = :ontario
+    myp.calibration = true
+    myp.fmild = 0.0 
+    myp.fsevere = 0.0
+    myp.fpreiso = 0.0
+    myp.fasymp = 0.5
+    myp.initialinf = 1
     cv.reset_params(myp)
     cv.initialize()
     cv.insert_infected(cv.PRE, 1, 4)
@@ -202,22 +208,15 @@ end
     x = humans[h[1]]
     @test length(h) == 1
     @test x.ag == 4
-    @test x.swap == cv.INF ## always true for calibration 
-    cv.time_update_cal() # run calibrate time time_update
-    @test x.health == cv.INF
-    @test x.swap == cv.REC
-    @test x.tis == 0 
-    @test x.iso == false 
-    @test x.exp == 5  ## change if needed.  
-
+    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF) ## always true for calibration 
     for i = 1:20 ## run for 20 days 
         cv.dyntrans()
-        cv.time_update_cal()
+        cv.time_update()
     end
     @test x.health == cv.REC  ## make sure the initial guy recovered
     @test x.exp == 999
-    ## everyone should really be in latent
-    all = findall(x -> x.health ∈ (cv.PRE, cv.ASYMP, cv.MILD, cv.MISO, cv.INF, cv.IISO, cv.HOS, cv.ICU, cv.DED), humans)
+    ## everyone should really be in latent (or susceptible) except the recovered guy
+    all = findall(x -> x.health ∈ (cv.PRE, cv.ASYMP, cv.MILD, cv.MISO, cv.INF, cv.IISO, cv.HOS, cv.ICU, cv.DED), cv.humans)
     @test length(all) == 0
     ## to do, make sure everyone stays latent
     
