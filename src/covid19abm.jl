@@ -43,6 +43,26 @@ const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
 
 export ModelParameters, HEALTH, Human, humans
 
+function runsim(simnum, ip::ModelParameters)
+    # function runs the `main` function, and collects the data as dataframes. 
+    hmatrix = main(ip)            
+    # get infectors counters
+    infectors = _count_infectors()
+    # get simulation age groups
+    ags = [x.ag for x in humans] # store a vector of the age group distribution 
+    all = _collectdf(hmatrix)
+    spl = _splitstate(hmatrix, ags)
+    ag1 = _collectdf(spl[1])
+    ag2 = _collectdf(spl[2])
+    ag3 = _collectdf(spl[3])
+    ag4 = _collectdf(spl[4])
+    ag5 = _collectdf(spl[5])
+    insertcols!(all, 1, :sim => simnum); insertcols!(ag1, 1, :sim => simnum); insertcols!(ag2, 1, :sim => simnum); 
+    insertcols!(ag3, 1, :sim => simnum); insertcols!(ag4, 1, :sim => simnum); insertcols!(ag5, 1, :sim => simnum); 
+    return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5, infectors=infectors)
+end
+export runsim
+
 function main(ip::ModelParameters)
     #Random.seed!(sim*726)
     ## datacollection            
@@ -53,7 +73,6 @@ function main(ip::ModelParameters)
 
     hmatrix = zeros(Int64, HSIZE, p.modeltime)
     initialize() # initialize population
-    ags = [x.ag for x in humans] # store a vector of the age group distribution 
     # insert initial infected agents into the model
     # and setup the right swap function. 
     if p.calibration 
@@ -77,10 +96,7 @@ function main(ip::ModelParameters)
         sw = time_update()
         # end of day
     end
-
-    # get infectors counters
-    icounts = _count_infectors()
-    return hmatrix, ags, icounts ## return the model state as well as the age groups. 
+    return hmatrix ## return the model state as well as the age groups. 
 end
 export main
 

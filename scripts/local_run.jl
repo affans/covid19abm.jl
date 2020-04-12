@@ -26,22 +26,9 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     myp.calibration && error("can not run simulation, calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
     cdr = pmap(1:nsims) do x                 
-        hmatrix, ags, infectors = main(myp)        
-        all = _collectdf(hmatrix)
-        spl = _splitstate(hmatrix, ags)
-        ag1 = _collectdf(spl[1])
-        ag2 = _collectdf(spl[2])
-        ag3 = _collectdf(spl[3])
-        ag4 = _collectdf(spl[4])
-        ag5 = _collectdf(spl[5])
-        return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5, infectors=infectors)
-    end    
+            cv.runsim(x, myp)
+    end      
 
-    for i = 1:nsims
-        dts = cdr[i]
-        insertcols!(dts.a, 1, :sim => i); insertcols!(dts.g1, 1, :sim => i); insertcols!(dts.g2, 1, :sim => i); 
-        insertcols!(dts.g3, 1, :sim => i); insertcols!(dts.g4, 1, :sim => i); insertcols!(dts.g5, 1, :sim => i); 
-    end
     println("simulations finished")
     println("total size of simulation dataframes: $(Base.summarysize(cdr))")
     ## write the infectors 
@@ -131,7 +118,7 @@ function _calibrate(nsims, myp::ModelParameters)
     println("calibration parameters:")
     dump(myp)
     cdr = pmap(1:nsims) do i 
-        h, ags = main(myp) ## gets the entire model. 
+        h = main(myp) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
         return val
     end
