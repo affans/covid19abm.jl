@@ -320,7 +320,6 @@ function move_to_latent(x::Human)
         x.swap = LAT 
         x.exp = 999
     end
-    x.iso == true && error("how did isolated person become infected")
     x.iso = false # starting at latent, person is not isolated from the community   
     x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
