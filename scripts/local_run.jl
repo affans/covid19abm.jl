@@ -35,13 +35,17 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
     ## stack the sims together
     allag = vcat([cdr[i].a  for i = 1:nsims]...)
-    ag1 = vcat([cdr[i].g1 for i = 1:nsims]...)
-    ag2 = vcat([cdr[i].g2 for i = 1:nsims]...)
-    ag3 = vcat([cdr[i].g3 for i = 1:nsims]...)
-    ag4 = vcat([cdr[i].g4 for i = 1:nsims]...)
-    ag5 = vcat([cdr[i].g5 for i = 1:nsims]...)
-    #mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
-    mydfs = Dict("all" => allag)
+    mp = vcat([cdr[i].g1 for i = 1:nsims]...)
+    po = vcat([cdr[i].g2 for i = 1:nsims]...)
+    im = vcat([cdr[i].g3 for i = 1:nsims]...)
+    en = vcat([cdr[i].g4 for i = 1:nsims]...)
+    ma = vcat([cdr[i].g5 for i = 1:nsims]...)
+    pr = vcat([cdr[i].g7 for i = 1:nsims]...)
+    si = vcat([cdr[i].g7 for i = 1:nsims]...)
+    wa = vcat([cdr[i].g8 for i = 1:nsims]...)
+   
+    mydfs = Dict("all" => allag, "c1" => mp, "c2" => po, "c3" => im, "c4" => en, "c5" => ma, "c6" => pr, "c7" => si, "c8" => wa)
+    #mydfs = Dict("all" => allag)
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 

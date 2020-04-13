@@ -14,6 +14,7 @@ Base.@kwdef mutable struct Human
     exp::Int64   = 0    # max statetime
     iso::Bool = false  ## isolated (limited contacts)
     icu::Bool = false ## is going to be in icu?
+    bhpcat::Symbol = :none
 end
 
 ## default system parameters
@@ -23,6 +24,7 @@ end
     calibration::Bool = false 
     modeltime::Int64 = 500
     initialinf::Int64 = 1
+    bhpinitialcat::Symbol = :mp ## the initial person is introduced in this category
     τmild::Int64 = 0 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.0  ## percent of people practice self-isolation
     fsevere::Float64 = 0.0 # fixed at 0.80
@@ -36,10 +38,12 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 10000
+const HSIZE = 1042
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
+const bhpdist = @SVector [22, 346, 7, 23, 352, 261, 15, 16]
+const bhpcats = @SVector [:mp, :po, :im, :en, :ma, :pr, :si, :wa]
 
 export ModelParameters, HEALTH, Human, humans
 
@@ -50,16 +54,28 @@ function runsim(simnum, ip::ModelParameters)
     infectors = _count_infectors()
     # get simulation age groups
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
+
     all = _collectdf(hmatrix)
     spl = _splitstate(hmatrix, ags)
-    ag1 = _collectdf(spl[1])
-    ag2 = _collectdf(spl[2])
-    ag3 = _collectdf(spl[3])
-    ag4 = _collectdf(spl[4])
-    ag5 = _collectdf(spl[5])
-    insertcols!(all, 1, :sim => simnum); insertcols!(ag1, 1, :sim => simnum); insertcols!(ag2, 1, :sim => simnum); 
-    insertcols!(ag3, 1, :sim => simnum); insertcols!(ag4, 1, :sim => simnum); insertcols!(ag5, 1, :sim => simnum); 
-    return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5, infectors=infectors)
+    mp = _collectdf(spl[1])
+    po = _collectdf(spl[2])
+    im = _collectdf(spl[3])
+    en = _collectdf(spl[4])
+    ma = _collectdf(spl[5])
+    pr = _collectdf(spl[6])
+    si = _collectdf(spl[7])
+    wa = _collectdf(spl[8])
+
+    insertcols!(all, 1, :sim => simnum);    
+    insertcols!(mp, 1, :sim => simnum); 
+    insertcols!(po, 1, :sim => simnum); 
+    insertcols!(im, 1, :sim => simnum); 
+    insertcols!(en, 1, :sim => simnum); 
+    insertcols!(ma, 1, :sim => simnum); 
+    insertcols!(pr, 1, :sim => simnum); 
+    insertcols!(si, 1, :sim => simnum); 
+    insertcols!(wa, 1, :sim => simnum); 
+    return (a=all, g1=mp, g2=po, g3=im, g4=en, g5=ma, g6=pr, g7=si, g8=wa, infectors=infectors)
 end
 export runsim
 
@@ -75,10 +91,11 @@ function main(ip::ModelParameters)
     initialize() # initialize population
     # insert initial infected agents into the model
     # and setup the right swap function. 
+    # [:mp, :po, :im, :en, :ma, :pr, :si, :wa]
     if p.calibration 
-        insert_infected(PRE, p.initialinf, 4)
+        insert_infected(PRE, p.initialinf, rand(bhpcats)) ## for calibration, insert in random 
     else 
-        insert_infected(LAT, p.initialinf, 4)  
+        insert_infected(LAT, p.initialinf, p.bhpinitialcat) ## for main simulations, insert in category
     end    
     
     ## save the preisolation isolation parameters
@@ -138,8 +155,8 @@ function _splitstate(hmatrix, ags)
     #split the full hmatrix into 4 age groups based on ags (the array of age group of each agent)
     #sizes = [length(findall(x -> x == i, ags)) for i = 1:4]
     matx = []#Array{Array{Int64, 2}, 1}(undef, 4)
-    for i = 1:length(agebraks)
-        idx = findall(x -> x == i, ags)
+    for ct in bhpcats
+        idx = findall(x -> x.bhpcat == ct, humans)
         push!(matx, view(hmatrix, idx, :))
     end
     return matx
@@ -228,6 +245,9 @@ end
 export get_province_ag
 
 function initialize() 
+    # alternative: vcat(collect.(Iterators.repeated.(bhpcats,bhpdist))...)
+    bhpsymbols = vcat([[bhpcats[i] for j = 1:bhpdist[i]] for i = 1:length(bhpdist)]...)
+    shuffle!(bhpsymbols)
     agedist = get_province_ag(p.prov)
     @inbounds for i = 1:HSIZE 
         humans[i] = Human()              ## create an empty human       
@@ -239,6 +259,8 @@ function initialize()
         if rand() < p.eldq && x.age >= 60  ## check if elderly need to be quarantined.
             x.iso = true            
         end
+        ## for bhp: need to assign according to vector
+        x.bhpcat = bhpsymbols[i]        
     end
 end
 export initialize
@@ -246,7 +268,7 @@ export initialize
 function insert_infected(health, num, ag) 
     ## inserts a number of infected people in the population randomly
     ## this function should resemble move_to_inf()
-    l = findall(x -> x.health == SUS && x.ag == ag, humans)
+    l = findall(x -> x.health == SUS && x.bhpcat == ag, humans)
     if length(l) > 0 && num < length(l)
         h = sample(l, num; replace = false)
         @inbounds for i in h 
@@ -418,9 +440,9 @@ function move_to_inf(x::Human)
     mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]     # death rate for severe cases.
     
     if p.calibration
-        h =  (0, 0, 0, 0)
-        c =  (0, 0, 0, 0)
-        mh = (0, 0, 0, 0)
+        h =  (0, 0, 0, 0, 0)
+        c =  (0, 0, 0, 0, 0)
+        mh = (0, 0, 0, 0, 0)
     end
 
     δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
@@ -525,20 +547,25 @@ function dyntrans()
     totalinf = 0
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
-    tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
-        findall(x -> x.ag == grp , humans)    
-    end
+    # tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
+    #     findall(x -> x.ag == grp , humans)    
+    # end
+    tomeet = map(bhpcats) do y
+        findall(x -> x.bhpcat == y, humans)
+    end ## the order of tomeet is according to the vector bhpcats 
+    ## which is different than the order in the contact distribution dicts, but it's okay since 
+    ## we get the proper key/value from the dict (where the value IS in order... ie nbs[:mp] gives the number of contacts in order of bhpcats)
     #length(tomeet) <= 5 && return totalinf
     for xid in infs
         x = humans[xid]
-        ag = x.ag   
+        ag = x.bhpcat  
         ih = x.health
         if x.iso ## isolated infectious person has limited contacts
             cnt = rand(1:3)
         else 
             cnt = rand(nbs[ag])  ## get number of contacts/day
         end
-        cnt >= length(tomeet[ag]) && error("error here")
+        #cnt >= length(tomeet[ag]) && error("error here")
         
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 
@@ -549,7 +576,7 @@ function dyntrans()
         # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
         # enumerate over the 15 groups and randomly select contacts from each group
         for (i, g) in enumerate(gpw)
-            if length(tomeet[i]) > 0 
+            if length(tomeet[i]) > 0   
                 meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
                 ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
                 for j in meet
@@ -600,6 +627,25 @@ function contact_matrix()
     CM[5] = [0.0207, 0.1083, 0.4071, 0.2193, 0.2446]
     return CM
 end
+
+function bhp_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, 8)    
+    CM[1] = [0.6444, 0.1, 0.0185, 0.0185, 0.1, 0.1, 0.0185, 0]
+    CM[2] = [0.0063, 0.7704, 0.0012, 0.0023, 0.1481, 0.0469, 0.0012, 0.0235]
+    CM[3] = [0.0833, 0.0833, 0.5, 0.0833, 0.0833, 0.0833, 0.0833, 0]
+    CM[4] = [0.05, 0.05, 0.025, 0.75, 0.075, 0.025, 0.025, 0]
+    CM[5] = [0.0063, 0.1467, 0.0012, 0.0023, 0.6844, 0.1114, 0.0012, 0.0465]
+    CM[6] = [0.0112, 0.0826, 0.0021, 0.0041, 0.1979, 0.6587, 0.0021, 0.0413]
+    CM[7] = [0.0312, 0.0625, 0.0312, 0.0312, 0.0625, 0.0625, 0.7188, 0]
+    CM[8] = [0, 0.1242, 0, 0.0062, 0.4969, 0.1242, 0, 0.2484]
+    for i = 1:8
+        push!(dd, bhpcats[i] => CM[i])
+    end 
+    return dd
+end
+const cm = bhp_matrix()
 # 
 # calibrate for 2.7 r0
 # 20% selfisolation, tau 1 and 2.
@@ -617,8 +663,18 @@ function negative_binomials()
     end
     return nbinoms   
 end
-const nbs = negative_binomials()
-const cm = contact_matrix()
+
+function bhp_binomials()
+    dd = Dict{Symbol, DiscreteUniform}()
+    means = [12, 12, 9, 9, 12, 9, 11, 50]
+    lb = [11, 11, 7, 7, 11, 8, 9, 45]
+    hb = [13, 13, 10, 10, 13, 10, 12, 55]
+    for i = 1:8
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+const nbs = bhp_binomials()
 export negative_binomials, contact_matrix, nbs, cm
 
 
