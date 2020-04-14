@@ -533,7 +533,7 @@ function dyntrans()
         ag = x.ag   
         ih = x.health
         if x.iso ## isolated infectious person has limited contacts
-            cnt = rand(1:3)
+            cnt = rand() < 0.5 ? 0 : rand(1:3)
         else 
             cnt = rand(nbs[ag])  ## get number of contacts/day
         end
