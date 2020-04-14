@@ -21,14 +21,9 @@ const infectiousstates = (cv.LAT, cv.MILD, cv.MISO, cv.INF, cv.IISO, cv.HOS, cv.
     for x in propertynames(cv.p)
         @test getfield(ip, x) == getfield(mod_ip, x)
     end
-    reset_params_default() ## check if it goes back to default
-    ip = ModelParameters()
-    for x in propertynames(cv.p)
-        @test getfield(ip, x) == getfield(mod_ip, x)
-    end        
 end
 
-@testset "demographics" begin
+@testset "initialization" begin
     cv.reset_params_default()
     initialize()
 
@@ -42,6 +37,7 @@ end
         @test x.health == cv.SUS
         @test x.swap == cv.UNDEF
         @test x.iso == false
+        @test x.isovia == :null
         @test x.tis == 0
         @test x.exp == 999
         @test x.sickfrom == cv.UNDEF
@@ -102,7 +98,7 @@ end
         end    
     end
 
-    # to do: check each compartment separately.
+    
     # CHECKING LATENT
     initialize()
     x = humans[1]
@@ -130,20 +126,17 @@ end
     # CHECKING PRE
     initialize()
     x = humans[1]
-    myp.fpreiso = 1.0
     cv.reset_params(myp)
     move_to_pre(x) 
     @test x.health == cv.PRE 
     @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
-    @test x.iso == true ## most important test
-
+   
     myp.fpreiso = 0.0
     cv.reset_params(myp)
     move_to_pre(x) 
     @test x.health == cv.PRE 
     @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
-    @test x.iso == false ## most important test
-
+    
     ## check if individual moves through mild, miso through fmild, tmild parameters
     initialize()
     x = humans[1]
@@ -164,7 +157,36 @@ end
     time_update() 
     @test x.health == cv.MISO
     @test x.swap == cv.REC
-    # to do: follow the movement of a single human
+    
+    ## todo: check if x.iso and x.isovia property are set correctly. 
+    # 1) check if they are isolated through quarantine
+    myp = cv.ModelParameters()   
+    myp.eldq = 1.0  ## turn on eldq
+    cv.reset_params(myp)
+    cv.initialize()    
+    for x in cv.humans
+        if x.age >= 60 
+            @test x.iso == true 
+            @test x.isovia == :qu
+        else 
+            @test x.iso == false 
+            @test x.isovia == :qu
+        end
+    end
+    # 2) check if they are isolated through presymptomatic capture 
+    # no need to test for mild/inf movement since it's a simple assignment in code
+    # more important to check through `main` when all the function dynamics are happening. 
+    myp = cv.ModelParameters()   
+    myp.eldq = 0.0  ## turn off eldq
+    myp.fsevere = 0.0 ## turn on fsevere
+    myp.fmild = 0.0
+    myp.fpreiso = 1.0 
+    cv.reset_params(myp)
+    cv.initialize()  
+    for x in cv.humans 
+        cv.move_to_pre(x)
+        @test x.iso == true && x.isovia == :pi
+    end
 end
 
 

@@ -13,7 +13,9 @@ Base.@kwdef mutable struct Human
     tis::Int64   = 0   # time in state 
     exp::Int64   = 0    # max statetime
     iso::Bool = false  ## isolated (limited contacts)
+    isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)
     icu::Bool = false ## is going to be in icu?
+    trace::Bool = false ## are we tracing contacts for this individual?
 end
 
 ## default system parameters
@@ -23,6 +25,7 @@ end
     calibration::Bool = false 
     modeltime::Int64 = 500
     initialinf::Int64 = 1
+    contacttracing::Bool = false ## contact tracing dynamics on/off
     τmild::Int64 = 0 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.0  ## percent of people practice self-isolation
     fsevere::Float64 = 0.0 # fixed at 0.80
@@ -30,7 +33,7 @@ end
     fasymp::Float64 = 0.50 ## percent going to asymp
     fpre::Float64 = 1.0 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
-    tpreiso::Int64 = 0## preiso is only turned on at this time. 
+    tpreiso::Int64 = 0## preiso is only turned on at this time.     
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -237,7 +240,8 @@ function initialize()
         x.age = rand(agebraks[x.ag]) 
         x.exp = 999  ## susceptible people don't expire.
         if rand() < p.eldq && x.age >= 60  ## check if elderly need to be quarantined.
-            x.iso = true            
+            x.iso = true   
+            x.isovia = :qu         
         end
     end
 end
@@ -320,7 +324,6 @@ function move_to_latent(x::Human)
         x.swap = LAT 
         x.exp = 999
     end
-    x.iso = false # starting at latent, person is not isolated from the community   
     x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
 export move_to_latent
@@ -334,9 +337,8 @@ function move_to_pre(x::Human)
     # calculate whether person is isolated
     if rand() < p.fpreiso
         x.iso = true # starting at latent, person is not isolated from the community   
-    else 
-        x.iso = false
-    end    
+        x.isovia = :pi
+    end
 
     # the reason why we can't move to MILD/MISO and INF/IISO here is that, 
     # particularly, for inf we need to check for hospitalization
@@ -350,6 +352,8 @@ function move_to_pre(x::Human)
         x.swap = INF
     end
 
+    # turn on contact tracing for this person.
+    # p.contacttracing && x.trace = true 
 end
 export move_to_pre
 
@@ -394,6 +398,7 @@ function move_to_miso(x::Human)
     x.tis = 0 
     x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious but it dosn't really matter
     x.iso = true  ## isolated from the community ... may already be set from before. still need it here if not set before
+    x.isovia = :mi ## this is technically a bug... if x.iso is set from before (say presymptomatic), this will overwrite it.... okay for now since we don't care for isovia property
 end
 export move_to_miso
 
@@ -455,6 +460,7 @@ function move_to_iiso(x::Human)
     x.health = IISO   
     x.swap = REC
     x.iso = true  ## isolated from the community ... may already be set from before.
+    x.isovia = :mi ## this is technically a bug... if x.iso is set from before (say presymptomatic), this will overwrite it.... okay for now since we don't care for isovia property
     x.tis = 0     ## reset time in state 
     x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious 
 end 
@@ -479,6 +485,7 @@ function move_to_hospicu(x::Human)
     x.swap = UNDEF
     x.tis = 0
     x.iso = true  ## hospitalized patients are isolated by default.
+    x.isovia = :mi
 
     if swaphealth == HOS 
         if rand() < mh[x.ag] ## person will die in the hospital 
