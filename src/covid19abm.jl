@@ -15,7 +15,9 @@ Base.@kwdef mutable struct Human
     iso::Bool = false  ## isolated (limited contacts)
     isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)
     icu::Bool = false ## is going to be in icu?
-    trace::Bool = false ## are we tracing contacts for this individual?
+    tracing::Bool = false ## are we tracing contacts for this individual?
+    tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
+    tracedxp::UInt16 = 0 ## if the person that is traced is sus after 14 days, the isolation is turned off. 
 end
 
 ## default system parameters
@@ -25,7 +27,6 @@ end
     calibration::Bool = false 
     modeltime::Int64 = 500
     initialinf::Int64 = 1
-    contacttracing::Bool = false ## contact tracing dynamics on/off
     τmild::Int64 = 0 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.0  ## percent of people practice self-isolation
     fsevere::Float64 = 0.0 # fixed at 0.80
@@ -33,7 +34,8 @@ end
     fasymp::Float64 = 0.50 ## percent going to asymp
     fpre::Float64 = 1.0 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
-    tpreiso::Int64 = 0## preiso is only turned on at this time.     
+    tpreiso::Int64 = 0## preiso is only turned on at this time. 
+    fctcapture::Float16 = 0.0 ## how many of contacts of the infected are we tracing.     
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -95,7 +97,8 @@ function main(ip::ModelParameters)
             p.fpreiso = _fpreiso
         end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        dyntrans()
+        dyntrans(st) 
+        contact_tracing(st)
         sw = time_update()
         # end of day
     end
@@ -113,6 +116,11 @@ function reset_params(ip::ModelParameters)
     end
 end
 export reset_params, reset_params_default
+
+function _model_check() 
+    ## checks model parameters before running 
+    (p.fctcapture > 0 && p.fpreiso > 0) && error("Can not do contact tracing and ID/ISO of pre at the same time.")
+end
 
 ## Data Collection/ Model State functions
 function _get_model_state(st, hmatrix)
@@ -353,7 +361,7 @@ function move_to_pre(x::Human)
     end
 
     # turn on contact tracing for this person.
-    # p.contacttracing && x.trace = true 
+    x.tracing = true ## if fctcapture = 0.0, this does nothing. 
 end
 export move_to_pre
 
@@ -527,7 +535,33 @@ function move_to_recovered(h::Human)
     h.iso = false ## a recovered person has ability to meet others
 end
 
-function dyntrans()
+function contact_tracing(sys_time) 
+    ## to do: if after 14 days the person is still susceptible, turn iso off. 
+    ## to do (done): if sus person is isolated, make it a wasted contact (so pool of people to "meet" is still large and relatively homogeneous)    
+    !(p.fctcapture > 0) && (return 0)
+    alltraced = findall(x -> x.tracedby > 0, humans)
+    howmany = 0 
+    for i in alltraced
+        y = humans[i]
+        tracer = humans[y.tracedby]
+        # check where this tracer is in terms of their disease progression
+        # if the tracer has reached the second day of infectious period, 
+        # we can isolate the y individual 
+        if tracer.health == INF && tracer.tis == 1  # tis = 1 means two days since its 0 based
+            y.iso = true 
+            y.isovia = :ct
+            howmany += 1 
+        end
+        if y.health == SUS && sys_time == y.tracedxp
+            y.iso = false 
+            y.isovia = :null
+        end
+    end
+    return howmany
+end
+export contact_tracing
+
+function dyntrans(sys_time)
     totalinf = 0
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
@@ -560,7 +594,16 @@ function dyntrans()
                 ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
                 for j in meet
                     y = humans[j]
-                    if y.health == SUS && y.swap == UNDEF
+                    if rand() < p.fctcapture && x.tracing && (ih == PRE || ih == INF) && x.tis < 2 ## if we are tracing the infected individual, record contacts
+                        ## only trace contacts within their presymp or first two days of severe
+                        ## Question: do we trace contacts of IISO (self-isolated so maybe not identified?) 
+                        ## no, the disease is severe so likely to be identified. 
+                        if y.tracedby == 0 
+                            y.tracedby = x.idx
+                            y.tracedxp = sys_time + 14
+                        end
+                    end                    
+                    if y.health == SUS && y.swap == UNDEF && !y.iso #i.e. a wasted contact
                         bf = p.β ## baseline PRE
                         # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
                         if ih == ASYMP

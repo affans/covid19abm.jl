@@ -23,7 +23,7 @@ const infectiousstates = (cv.LAT, cv.MILD, cv.MISO, cv.INF, cv.IISO, cv.HOS, cv.
     end
 end
 
-@testset "initialization" begin
+@testset "init" begin
     cv.reset_params_default()
     initialize()
 
@@ -170,7 +170,7 @@ end
             @test x.isovia == :qu
         else 
             @test x.iso == false 
-            @test x.isovia == :qu
+            @test x.isovia == :null
         end
     end
     # 2) check if they are isolated through presymptomatic capture 
@@ -190,22 +190,22 @@ end
 end
 
 
-@testset "dyntrans" begin
+@testset "tranmission" begin
     cv.reset_params_default()
     initialize()
     
     # since beta = 0 default, and everyone sus
-    totalinf = dyntrans()  
+    totalinf = dyntrans(1)  
     @test totalinf == 0
 
     # check with only a single infected person 
     insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
-    totalinf = dyntrans()  
+    totalinf = dyntrans(1)  
     @test totalinf == 0 # still zero cuz beta = 0
 
     # now change beta 
     cv.reset_params(ModelParameters(β = 1.0))
-    totalinf = dyntrans()  
+    totalinf = dyntrans(1)  
     @test totalinf > 0 ## actually may still be zero because of stochasticity but very unliekly 
 
     ## somehow check the transmission reduction and number of contacts
@@ -232,7 +232,7 @@ end
     @test x.ag == 4
     @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF) ## always true for calibration 
     for i = 1:20 ## run for 20 days 
-        cv.dyntrans()
+        cv.dyntrans(i)
         cv.time_update()
     end
     @test x.health == cv.REC  ## make sure the initial guy recovered
@@ -242,6 +242,81 @@ end
     @test length(all) == 0
     ## to do, make sure everyone stays latent
     
+end
+
+@testset "contact trace" begin
+    myp = ModelParameters()
+    myp.β = 1.0 
+    cv.reset_params(myp)
+    cv.initialize()
+    hdx = rand(1:10000, 100) ## sample 100 humans instead of all 10000 
+    for i in hdx 
+        move_to_pre(humans[i])
+        @test humans[i].tracing == true
+    end
+
+    ## test the contact_tracing() function 
+    cv.initialize()    
+    tracer = cv.humans[1]
+    move_to_pre(tracer) ## move random human to presymptomatic
+    @test tracer.tis == 0 ## these tests are not really needed, but good to verify again
+    @test tracer.exp == 1
+    @test tracer.tracing == true
+    cv.dyntrans(1) ## go through a tranmission cycle
+    alltraced = findall(x -> x.tracedby > 0, cv.humans) 
+    @test length(alltraced) == 0## since we havn't turned fctcapture > 0
+    myp.fctcapture = 1.0 
+    cv.reset_params(myp)
+    cv.dyntrans(1) ## go through a tranmission cycle
+    alltraced = findall(x -> x.tracedby > 0, cv.humans) ## since we havn't turned fctcapture > 0
+    @test length(alltraced) > 0
+    cv.contact_tracing(1)
+    for i in alltraced
+        y = cv.humans[i]
+        @test y.tracedby == 1 ## since we used the first human as the tracing contact
+        @test y.tracedxp == 1 + 14 
+        @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
+        @test y.isovia == :null 
+    end
+    cv.move_to_inf(tracer) ## can use time_update to move because may go to mild/asymp, tis = 0
+    cv.time_update() #will move, tis = 1
+    @test tracer.health == cv.INF && tracer.tis == 1  ## this condition is used inside contact_tracing
+    cv.contact_tracing(3)  ## technically time is now "3" after three time_updates
+    for i in alltraced
+        y = cv.humans[i]
+        @test y.tracedby == 1 ## since we used the first human as the tracing contact
+        @test y.tracedxp == 1 + 14 
+        @test y.iso == true ## the first human is not in INF stage yet.. still in presymp
+        @test y.isovia == :ct 
+    end
+end
+
+@testset "main run" begin 
+    ## run model with high beta 
+    myp = cv.ModelParameters()
+    myp.β = 0.0525 
+    myp.prov = :newyork    
+    ## run empty scenario
+    ## this wont return calibrated scenario since fasymp = 0
+    myp.τmild = 0
+    myp.fmild = 0.0
+    myp.fsevere = 0.0
+    myp.eldq = 0.0  
+    myp.fasymp = 0.5
+    myp.fpre = 1.0
+    myp.fpreiso = 0.0 
+    myp.tpreiso = 0
+    myp.fctcapture = 0.0
+    cv.runsim(1, myp) # warm up the functions
+    println("time with contact tracing off:")
+    @time results = cv.main(myp)
+
+    myp.fctcapture = 1.0
+    cv.runsim(1, myp)
+    println("time with contact tracing on:")
+    @time results = cv.main(myp)
+    
+
 end
 
 
