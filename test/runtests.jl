@@ -252,7 +252,7 @@ end
     hdx = rand(1:10000, 100) ## sample 100 humans instead of all 10000 
     for i in hdx 
         move_to_pre(humans[i])
-        @test humans[i].tracing == true
+        @test humans[i].tracing == false ## since fctcapture = 0.0
     end
 
     ## test the contact_tracing() function 
@@ -261,12 +261,16 @@ end
     move_to_pre(tracer) ## move random human to presymptomatic
     @test tracer.tis == 0 ## these tests are not really needed, but good to verify again
     @test tracer.exp == 1
-    @test tracer.tracing == true
+    @test tracer.tracing == false
     cv.dyntrans(1) ## go through a tranmission cycle
     alltraced = findall(x -> x.tracedby > 0, cv.humans) 
     @test length(alltraced) == 0## since we havn't turned fctcapture > 0
     myp.fctcapture = 1.0 
     cv.reset_params(myp)
+    cv.initialize()    
+    tracer = cv.humans[1]
+    move_to_pre(tracer) ## move random human to presymptomatic, this should force tracing on 
+    @test tracer.tracing == true
     cv.dyntrans(1) ## go through a tranmission cycle
     alltraced = findall(x -> x.tracedby > 0, cv.humans) ## since we havn't turned fctcapture > 0
     @test length(alltraced) > 0

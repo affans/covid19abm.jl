@@ -33,6 +33,9 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     println("total size of simulation dataframes: $(Base.summarysize(cdr))")
     ## write the infectors 
     writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
+
+    ## write contact numbers
+    writedlm("$(folderprefix)/ctnumbers.dat", [cdr[i].ct_numbers for i = 1:nsims])    
     ## stack the sims together
     allag = vcat([cdr[i].a  for i = 1:nsims]...)
     ag1 = vcat([cdr[i].g1 for i = 1:nsims]...)
@@ -95,7 +98,7 @@ function compute_yearly_average(df)
 end
 
 
-function savestr(p::ModelParameters)
+function savestr(p::ModelParameters, custominsert="/")
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
     taustr = replace(string(p.τmild), "." => "")
@@ -108,8 +111,8 @@ function savestr(p::ModelParameters)
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fsev = replace(string(p.fsevere), "." => "")
-    ct = p.contacttracing ? "1" : "0" 
-    fldrname = "/data/covid19abm/simresults/b$rstr/$(prov)_ct$(ct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    ct = replace(string(p.fctcapture), "." => "")
+    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_ct$(ct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 

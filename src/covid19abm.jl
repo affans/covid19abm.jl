@@ -53,6 +53,9 @@ function runsim(simnum, ip::ModelParameters)
     hmatrix = main(ip)            
     # get infectors counters
     infectors = _count_infectors()
+
+    ct_numbers = _count_ct_numbers()
+
     # get simulation age groups
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
     all = _collectdf(hmatrix)
@@ -64,7 +67,7 @@ function runsim(simnum, ip::ModelParameters)
     ag5 = _collectdf(spl[5])
     insertcols!(all, 1, :sim => simnum); insertcols!(ag1, 1, :sim => simnum); insertcols!(ag2, 1, :sim => simnum); 
     insertcols!(ag3, 1, :sim => simnum); insertcols!(ag4, 1, :sim => simnum); insertcols!(ag5, 1, :sim => simnum); 
-    return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5, infectors=infectors)
+    return (a=all, g1=ag1, g2=ag2, g3=ag3, g4=ag4, g5=ag5, infectors=infectors, ct_numbers=ct_numbers)
 end
 export runsim
 
@@ -212,7 +215,26 @@ function _count_infectors()
     end
     return (pre_ctr, asymp_ctr, mild_ctr, inf_ctr)
 end
-export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors
+
+function _count_ct_numbers() 
+    howmany = 0 
+    howmanysick = 0
+    howmany_trc = 0 
+    for x in humans 
+        if x.tracedby > 0 
+            howmany_trc += 1
+        end
+        if x.isovia == :ct
+            howmany += 1
+            if x.health != SUS 
+                ## basic check               
+                howmanysick += 1 
+            end
+        end
+    end
+    return howmany, howmanysick, howmany_trc
+end
+export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors, _count_ct_numbers
 
 ## initialization functions 
 function get_province_ag(prov) 
@@ -361,7 +383,7 @@ function move_to_pre(x::Human)
     end
 
     # turn on contact tracing for this person.
-    x.tracing = true ## if fctcapture = 0.0, this does nothing. 
+    rand() < p.fctcapture && (x.tracing = true)
 end
 export move_to_pre
 
@@ -540,24 +562,24 @@ function contact_tracing(sys_time)
     ## to do (done): if sus person is isolated, make it a wasted contact (so pool of people to "meet" is still large and relatively homogeneous)    
     !(p.fctcapture > 0) && (return 0)
     alltraced = findall(x -> x.tracedby > 0, humans)
-    howmany = 0 
     for i in alltraced
         y = humans[i]
-        tracer = humans[y.tracedby]
+        tracer = humans[y.tracedby] 
         # check where this tracer is in terms of their disease progression
         # if the tracer has reached the second day of infectious period, 
         # we can isolate the y individual 
-        if tracer.health == INF && tracer.tis == 1  # tis = 1 means two days since its 0 based
+        if (tracer.health == INF || tracer.health == MILD) && tracer.tis == 1  # tis = 1 means two days since its 0 based
+            # this part of code should only run once really.
             y.iso = true 
-            y.isovia = :ct
-            howmany += 1 
+            y.isovia = :ct            
         end
-        if y.health == SUS && sys_time == y.tracedxp
+        # if however its been 14 days since SUS was isolated via ct, deisolate them. 
+        if y.health == SUS && sys_time == y.tracedxp && y.isovia == :ct
             y.iso = false 
-            y.isovia = :null
+            #y.isovia = :null # if we ignore this, we can count how many people were traced in total
         end
     end
-    return howmany
+    return length(alltraced)
 end
 export contact_tracing
 
@@ -566,7 +588,7 @@ function dyntrans(sys_time)
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
     tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
-        findall(x -> x.ag == grp , humans)    
+        findall(x -> x.ag == grp && (x.iso == false || x.isovia != :ct), humans)    
     end
     #length(tomeet) <= 5 && return totalinf
     for xid in infs
@@ -594,7 +616,7 @@ function dyntrans(sys_time)
                 ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
                 for j in meet
                     y = humans[j]
-                    if rand() < p.fctcapture && x.tracing && (ih == PRE || ih == INF) && x.tis < 2 ## if we are tracing the infected individual, record contacts
+                    if x.tracing && ((ih == PRE && x.swap != ASYMP) || ih == INF || ih == MILD) && x.tis < 2 ## if we are tracing the infected individual, record contacts
                         ## only trace contacts within their presymp or first two days of severe
                         ## Question: do we trace contacts of IISO (self-isolated so maybe not identified?) 
                         ## no, the disease is severe so likely to be identified. 
