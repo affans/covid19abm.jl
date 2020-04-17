@@ -112,29 +112,20 @@ function run_scenarios()
     myp = covid19abm.ModelParameters()
     nsims = 500
     start = time()    
-    myp.β = 0.0425 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
+    myp.β = 0.0525 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
     
     ## scenario model baseline: no isolation, no pre, no asymp, no quarantine of individuals 
     myp.prov = :locB
     calibrate(myp.β, 500, :locB)
-    myp.τmild = 0
-    myp.fmild = 0.0
-    myp.fsevere = 0.0
-    myp.eldq = 0.0  
-    myp.fasymp = 0.0
-    myp.fpre = 0.0
-    myp.fpreiso = 0.0 
-    myp.tpreiso = 0
-    prefix = savestr(myp)
-    println("$prefix")
-    run(myp, 500, prefix)
-    ## in all scenarios: 
+
+
     myp.fasymp = 0.50
     myp.fsevere = 0.80
     myp.fpre = 1.0
     prefix = savestr(myp)
     println("$prefix")
     run(myp, 500, prefix)
+
     ## scenario 1: no presymptomatic isolation, only self-isolation
     myp.fpreiso = 0.0 
     myp.tpreiso = 0
@@ -177,6 +168,73 @@ function run_scenarios()
     end    
 end
 
+function run_scenarios_apr16()
+    #     Asymptomatic
+    # 1.       We are interested in also seeing the impact of removing asymptomatic people from the workforce, using the same methodology as employed for pre-symptomatic (so 20%, 40%, 60%, 80%), and specifically the impact of removing:
+    # a.       Asymptomatic alone (fasymp=20..80, fmild=0, fpreiso=0, fsevere=0.80)
+    # b.       Asymptomatic and pre-symptomatic combined (fasymp=20..80, fpreiso=10, 20, 30, 40, fmild=0,  fsevere=0.80)
+    # c.       Asymptomatic and symptomatic combined (fasymp, fmild=?, fsevere=0.80)
+    # d.       Asymptomatic, pre-symptomatic and symptomatic combined (fasymp=20..80, fpreiso=10, 20, 30, 40, fmild=20 .. 80,  fsevere=0.80)
+    # 2.       If doing all of these is problematic, the priority is asymptomatic alone.
+    # 3.       If the above cannot be done for the workforce, then can it be done for the community for the coming week?
+    myp = covid19abm.ModelParameters()
+    nsims = 500
+    start = time()    
+    myp.β = 0.0525 ## fix a beta, without isolation of the initial severe case this is R0 2.6/2.7
+    # default values
+    myp.fasymp = 0.50
+    myp.fpre = 1.0
+    
+    ## scenario model baseline: no isolation, no pre, no asymp, no quarantine of individuals 
+    myp.prov = :locB
+    calibrate(myp.β, 500, :locB)
+
+    # only asymptomatic scenario (number 1 from above list)
+    myp.fpreiso = 0.0 
+    myp.tpreiso = 0
+    myp.τmild = 0
+    myp.fmild = 0 
+    myp.fsevere = 0.80
+    isovals = (0.20, 0.40, 0.60, 0.80)
+    for si in isovals 
+        myp.fasympiso = si    
+        prefix = savestr(myp)
+        println("$prefix")
+        run(myp, 500, prefix)
+    end
+
+    # combination scenarios (number 2 from above list, other scenarios not needed)
+    myp.fpreiso = 0.0 
+    myp.tpreiso = 1
+    myp.τmild = 0
+    myp.fmild = 0 
+    myp.fsevere = 0.80
+    isovals = (0.20, 0.40, 0.60, 0.80)
+    for si in isovals 
+        myp.fasympiso = si   
+        myp.fpreiso = si/2         
+        prefix = savestr(myp)
+        println("$prefix")
+        run(myp, 500, prefix)
+    end
+
+    # combination scenarios (number 4 from above list, other scenarios not needed)
+    myp.fpreiso = 0.0 
+    myp.tpreiso = 1
+    myp.τmild = 0
+    myp.fmild = 0 
+    myp.fsevere = 0.80
+    isovals = (0.20, 0.40, 0.60, 0.80)
+    for si in isovals 
+        myp.fasympiso = si   
+        myp.fmild = si
+        myp.fpreiso = si/2         
+        prefix = savestr(myp)
+        println("$prefix")
+        run(myp, 500, prefix)
+    end
+end
+
 function savestr(p::ModelParameters)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
@@ -189,7 +247,8 @@ function savestr(p::ModelParameters)
     fasymp = replace(string(p.fasymp), "." => "")
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
-    fldrname = "/data/covid19abm/simresults/$(prov)_tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fasympiso = replace(string(p.fasympiso), "." => "")
+    fldrname = "/data/covid19abm/simresults/$(prov)_tau$(taustr)_f$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)__asympiso$(fasympiso)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 

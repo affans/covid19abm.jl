@@ -27,6 +27,7 @@ end
     fpre::Float64 = 0.50 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 1 ## preiso is only turned on at this time. 
+    fasympiso::Float64 = 0.0 ## isolation of presymptomatic
     calibration::Bool = false 
     modeltime::Int64 = 500
 end
@@ -34,7 +35,7 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 8737 # locA: 13844, locB: 8737
+const HSIZE = 8737 #13844 #8737 # locA: 13844, locB: 8737
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
@@ -59,7 +60,7 @@ function main(ip::ModelParameters)
         insert_infected(PRE, 1, 4)
     else 
         swapupdate = time_update
-        insert_infected(LAT, 5, 4)  
+        insert_infected(LAT, 1, 4)  
     end    
     
     ## save the preisolation isolation parameters
@@ -335,14 +336,17 @@ end
 export move_to_pre
 
 function move_to_asymp(x::Human)
-     ## transfers human h to the asymptomatic stage 
-     γ = 5 
-     x.health = ASYMP     
-     x.tis = 0 
-     x.exp = γ
-     x.swap = REC 
-     # x.iso property remains from either the latent or presymptomatic class
-     # if x.iso is true, the asymptomatic individual has limited contacts
+    ## transfers human h to the asymptomatic stage 
+    γ = 5 
+    x.health = ASYMP     
+    x.tis = 0 
+    x.exp = γ
+    x.swap = REC 
+    # x.iso property remains from either the latent or presymptomatic class
+    # if x.iso is true, the asymptomatic individual has limited contacts
+    if rand() < p.fasympiso 
+        x.iso = true
+    end
 end
 export move_to_asymp
 
@@ -530,7 +534,7 @@ function dyntrans()
                     bf = p.β ## baseline PRE
                     # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
                     if x.health == ASYMP
-                        bf = bf * 0.11
+                        bf = bf * 0.50
                     elseif x.health == MILD || x.health == MISO 
                         bf = bf * 0.44
                     elseif x.health == INF || x.health == IISO 
