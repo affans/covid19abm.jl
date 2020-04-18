@@ -97,7 +97,6 @@ function compute_yearly_average(df)
     return ya
 end
 
-
 function savestr(p::ModelParameters, custominsert="/")
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
@@ -111,8 +110,9 @@ function savestr(p::ModelParameters, custominsert="/")
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fsev = replace(string(p.fsevere), "." => "")
-    ct = replace(string(p.fctcapture), "." => "")
-    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_ct$(ct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    pct = replace(string(p.fctcapture), "." => "")
+    tct = replace(string(p.maxtracedays), "." => "")
+    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_tct$(tct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 

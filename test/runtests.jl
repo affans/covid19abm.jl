@@ -249,50 +249,70 @@ end
     myp.β = 1.0 
     cv.reset_params(myp)
     cv.initialize()
-    hdx = rand(1:10000, 100) ## sample 100 humans instead of all 10000 
-    for i in hdx 
-        move_to_pre(humans[i])
-        @test humans[i].tracing == false ## since fctcapture = 0.0
+    hdx = rand(1:10000, 20) ## sample 20 humans instead of all 10000 
+    for i in hdx
+        x = cv.humans[i] 
+        cv.ct_dynamics(x)
+        @test x.tracing == false ## since fctcapture = 0.0
+        @test x.tracinguntil == 0
+        @test x.tracedby == 0 
+        @test x.tracedxp == 0
     end
 
     ## test the contact_tracing() function 
     cv.initialize()    
-    tracer = cv.humans[1]
-    move_to_pre(tracer) ## move random human to presymptomatic
-    @test tracer.tis == 0 ## these tests are not really needed, but good to verify again
-    @test tracer.exp == 1
-    @test tracer.tracing == false
-    cv.dyntrans(1) ## go through a tranmission cycle
-    alltraced = findall(x -> x.tracedby > 0, cv.humans) 
-    @test length(alltraced) == 0## since we havn't turned fctcapture > 0
     myp.fctcapture = 1.0 
+    myp.fasymp = 0.0  # to force no asymp
     cv.reset_params(myp)
     cv.initialize()    
     tracer = cv.humans[1]
-    move_to_pre(tracer) ## move random human to presymptomatic, this should force tracing on 
-    @test tracer.tracing == true
-    cv.dyntrans(1) ## go through a tranmission cycle
+    cv.move_to_pre(tracer) # newly presymptomatic
+    cv.ct_dynamics(tracer) # will turn on tracing
+    @test tracer.tracing == true 
+    @test tracer.tracinguntil == 3
+
+    cv.dyntrans(1) ## go through a single tranmission cycle
     alltraced = findall(x -> x.tracedby > 0, cv.humans) ## since we havn't turned fctcapture > 0
     @test length(alltraced) > 0
-    cv.contact_tracing(1)
     for i in alltraced
         y = cv.humans[i]
         @test y.tracedby == 1 ## since we used the first human as the tracing contact
-        @test y.tracedxp == 1 + 14 
+        @test y.tracedxp == 14
         @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
         @test y.isovia == :null 
     end
-    cv.move_to_inf(tracer) ## can use time_update to move because may go to mild/asymp, tis = 0
-    cv.time_update() #will move, tis = 1
-    @test tracer.health == cv.INF && tracer.tis == 1  ## this condition is used inside contact_tracing
-    cv.contact_tracing(3)  ## technically time is now "3" after three time_updates
+    ## time update calls the ctdynamics function.. have to use this because otherwise tracer is stuck on PRE day 1. 
+    cv.time_update() 
+    #cv.ct_dynamics(tracer) # will turn on tracing
+    @test tracer.tracing == true 
+    @test tracer.tracinguntil == 2 
     for i in alltraced
         y = cv.humans[i]
         @test y.tracedby == 1 ## since we used the first human as the tracing contact
-        @test y.tracedxp == 1 + 14 
-        @test y.iso == true ## the first human is not in INF stage yet.. still in presymp
-        @test y.isovia == :ct 
+        @test y.tracedxp == 14
+        @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
+        @test y.isovia == :null 
     end
+    cv.time_update()
+    @test tracer.tracing == true 
+    @test tracer.tracinguntil == 1
+    for i in alltraced
+        y = cv.humans[i]
+        @test y.tracedby == 1 ## since we used the first human as the tracing contact
+        @test y.tracedxp == 14
+        @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
+        @test y.isovia == :null 
+    end
+    cv.time_update()
+    @test tracer.tracing == false  
+    @test tracer.tracinguntil == 0
+    # for i in alltraced
+    #     y = cv.humans[i]
+    #     @test y.tracedby == 1 
+    #     @test y.tracedxp == 13 ## one less day from 14
+    #     @test y.iso == true ## the first human is not in INF stage yet.. still in presymp
+    #     @test y.isovia == :ct 
+    # end
 end
 
 @testset "main run" begin 

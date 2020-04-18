@@ -16,6 +16,7 @@ Base.@kwdef mutable struct Human
     isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)
     icu::Bool = false ## is going to be in icu?
     tracing::Bool = false ## are we tracing contacts for this individual?
+    tracinguntil::Int8 = -1 ## how many days a symptomatic contacts are traced, setting it to -1 allows us to figure out who was traced
     tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
     tracedxp::UInt16 = 0 ## if the person that is traced is sus after 14 days, the isolation is turned off. 
 end
@@ -36,6 +37,7 @@ end
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
     fctcapture::Float16 = 0.0 ## how many of contacts of the infected are we tracing.     
+    maxtracedays::Int8 = 3 ## how many days to trace of 
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -101,7 +103,6 @@ function main(ip::ModelParameters)
         end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
         dyntrans(st) 
-        contact_tracing(st)
         sw = time_update()
         # end of day
     end
@@ -123,6 +124,7 @@ export reset_params, reset_params_default
 function _model_check() 
     ## checks model parameters before running 
     (p.fctcapture > 0 && p.fpreiso > 0) && error("Can not do contact tracing and ID/ISO of pre at the same time.")
+    #tracinguntil can not be zero
 end
 
 ## Data Collection/ Model State functions
@@ -217,22 +219,22 @@ function _count_infectors()
 end
 
 function _count_ct_numbers() 
-    howmany = 0 
-    howmanysick = 0
-    howmany_trc = 0 
+    howmanytrc = 0 # how many traced (num / (inf + mild) ~ percentage)
+    howmanyisoct = 0 # how many isolated (of all sick people) (contact tracing)
+    howmanyisopi = 0 # how many isolated (of all sick people) (through presymp)
+  
     for x in humans 
-        if x.tracedby > 0 
-            howmany_trc += 1
+        if x.tracinguntil >= 0
+            howmanytrc += 1       
         end
-        if x.isovia == :ct
-            howmany += 1
-            if x.health != SUS 
-                ## basic check               
-                howmanysick += 1 
-            end
+        if x.isovia == :ct && x.health != SUS 
+            howmanyisoct += 1
+        end
+        if x.isovia == :pi && x.health != SUS 
+            howmanyisopi += 1
         end
     end
-    return howmany, howmanysick, howmany_trc
+    return howmanytrc, howmanyisoct, howmanyisopi
 end
 export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors, _count_ct_numbers
 
@@ -322,10 +324,27 @@ function time_update()
                 _    => error("swap expired, but no swap set.")
             end
         end
+        # run covid-19 functions for other integrated dynamics. 
+        ct_dynamics(x)
     end
     return (lat, mild, miso, inf, infiso, hos, icu, rec, ded)
 end
 export time_update
+
+@inline _set_isolation(x::Human, iso) = _set_isolation(x, iso, x.isovia)
+@inline function _set_isolation(x::Human, iso, via)
+    # a helper setter function to not overwrite the isovia property. 
+    # a person could be isolated in susceptible/latent phase through contact tracing
+    # --> in which case it will follow through the natural history of disease 
+    # --> if the person remains susceptible, then iso = off
+    # a person could be isolated in presymptomatic phase through fpreiso
+    # --> if x.iso == true from CT and x.isovia == :ct, do not overwrite
+    # a person could be isolated in mild/severe phase through fmild, fsevere
+    # --> if x.iso == true from CT and x.isovia == :ct, do not overwrite
+    # --> if x.iso == true from PRE and x.isovia == :pi, do not overwrite
+    x.iso = iso 
+    x.isovia == :null && (x.isovia = via)
+end
 
 function move_to_latent(x::Human)
     ## transfers human h to the incubation period and samples the duration
@@ -365,10 +384,7 @@ function move_to_pre(x::Human)
     x.exp = 1   # one day in presymptomatic
 
     # calculate whether person is isolated
-    if rand() < p.fpreiso
-        x.iso = true # starting at latent, person is not isolated from the community   
-        x.isovia = :pi
-    end
+    rand() < p.fpreiso && _set_isolation(x, true, :pi)
 
     # the reason why we can't move to MILD/MISO and INF/IISO here is that, 
     # particularly, for inf we need to check for hospitalization
@@ -381,9 +397,6 @@ function move_to_pre(x::Human)
     else 
         x.swap = INF
     end
-
-    # turn on contact tracing for this person.
-    rand() < p.fctcapture && (x.tracing = true)
 end
 export move_to_pre
 
@@ -427,8 +440,7 @@ function move_to_miso(x::Human)
     x.swap = REC
     x.tis = 0 
     x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious but it dosn't really matter
-    x.iso = true  ## isolated from the community ... may already be set from before. still need it here if not set before
-    x.isovia = :mi ## this is technically a bug... if x.iso is set from before (say presymptomatic), this will overwrite it.... okay for now since we don't care for isovia property
+    _set_isolation(x, true, :mi) 
 end
 export move_to_miso
 
@@ -489,10 +501,9 @@ function move_to_iiso(x::Human)
     oldexp = x.exp
     x.health = IISO   
     x.swap = REC
-    x.iso = true  ## isolated from the community ... may already be set from before.
-    x.isovia = :mi ## this is technically a bug... if x.iso is set from before (say presymptomatic), this will overwrite it.... okay for now since we don't care for isovia property
     x.tis = 0     ## reset time in state 
     x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious 
+    _set_isolation(x, true, :mi)
 end 
 
 function move_to_hospicu(x::Human)   
@@ -514,8 +525,8 @@ function move_to_hospicu(x::Human)
     x.health = swaphealth ## swap either to HOS or ICU
     x.swap = UNDEF
     x.tis = 0
-    x.iso = true  ## hospitalized patients are isolated by default.
-    x.isovia = :mi
+    # hospital patients are isolated, but it's irrelevant because they don't have contacts and can't get sick again
+    _set_isolation(x, true) # do not set the isovia property here.  
 
     if swaphealth == HOS 
         if rand() < mh[x.ag] ## person will die in the hospital 
@@ -547,6 +558,8 @@ function move_to_dead(h::Human)
     h.tis = 0 
     h.exp = 999 ## stay recovered indefinitely
     h.iso = true # a dead person is isolated
+    _set_isolation(h, true)  # do not set the isovia property here.  
+    # isolation property has no effect in contact dynamics anyways (unless x == SUS)
 end
 
 function move_to_recovered(h::Human)
@@ -555,40 +568,61 @@ function move_to_recovered(h::Human)
     h.tis = 0 
     h.exp = 999 ## stay recovered indefinitely
     h.iso = false ## a recovered person has ability to meet others
+    _set_isolation(h, false)  # do not set the isovia property here.  
+    # isolation property has no effect in contact dynamics anyways (unless x == SUS)
 end
 
-function contact_tracing(sys_time) 
-    ## to do: if after 14 days the person is still susceptible, turn iso off. 
-    ## to do (done): if sus person is isolated, make it a wasted contact (so pool of people to "meet" is still large and relatively homogeneous)    
+ function ct_dynamics(x::Human)
+    # main function for ct dynamics 
+    # turns tracing on if person is infectious and in the right time window
+    # applies isolation to all traced contacts
+    # turns of isolation for susceptibles > 14 days
+    # order of if statements matter here 
     !(p.fctcapture > 0) && (return 0)
-    alltraced = findall(x -> x.tracedby > 0, humans)
-    for i in alltraced
-        y = humans[i]
-        tracer = humans[y.tracedby] 
-        # check where this tracer is in terms of their disease progression
-        # if the tracer has reached the second day of infectious period, 
-        # we can isolate the y individual 
-        if (tracer.health == INF || tracer.health == MILD) && tracer.tis == 1  # tis = 1 means two days since its 0 based
-            # this part of code should only run once really.
-            y.iso = true 
-            y.isovia = :ct            
-        end
-        # if however its been 14 days since SUS was isolated via ct, deisolate them. 
-        if y.health == SUS && sys_time == y.tracedxp && y.isovia == :ct
-            y.iso = false 
-            #y.isovia = :null # if we ignore this, we can count how many people were traced in total
+    xh = x.health 
+    xs = x.swap
+
+    # everyday remove a day
+    if x.tracing 
+        x.tracinguntil -= 1
+        if x.tracinguntil == 0 ## agent identified, make all contacts isolate
+            x.tracing = false
+            alltraced = findall(y -> y.tracedby == x.idx, humans)
+            for i in alltraced
+                y = humans[i]
+                _set_isolation(y, true, :ct)
+            end            
         end
     end
-    return length(alltraced)
+
+    # when the person is a new PRE, check for whether we will trace 
+    if xh == PRE && xs != ASYMP && x.tis == 0 
+        if rand() < p.fctcapture
+            x.tracing = true
+            x.tracinguntil = p.maxtracedays ## trace for this many days
+        end
+    end
+
+    # a susceptible that was traced through infected is only isolated for 14 days. 
+    if xh == SUS && x.iso == true && x.isovia == :ct 
+        x.tracedxp -= 1
+        if x.tracedxp == 0 
+            _set_isolation(x, false)
+        end
+    end
 end
-export contact_tracing
+export ct_dynamics
 
 function dyntrans(sys_time)
     totalinf = 0
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
     tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
-        findall(x -> x.ag == grp && (x.iso == false || x.isovia != :ct), humans)    
+        findall(humans) do h
+            c1 = h.ag == grp 
+            c2 = h.health == SUS ? !(h.iso) : true
+            return c1 && c2
+        end
     end
     #length(tomeet) <= 5 && return totalinf
     for xid in infs
@@ -616,13 +650,11 @@ function dyntrans(sys_time)
                 ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
                 for j in meet
                     y = humans[j]
-                    if x.tracing && ((ih == PRE && x.swap != ASYMP) || ih == INF || ih == MILD) && x.tis < 2 ## if we are tracing the infected individual, record contacts
-                        ## only trace contacts within their presymp or first two days of severe
-                        ## Question: do we trace contacts of IISO (self-isolated so maybe not identified?) 
-                        ## no, the disease is severe so likely to be identified. 
+                    ## if we are tracing the infected individual, record contacts
+                    if x.tracing  
                         if y.tracedby == 0 
                             y.tracedby = x.idx
-                            y.tracedxp = sys_time + 14
+                            y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
                         end
                     end                    
                     if y.health == SUS && y.swap == UNDEF && !y.iso #i.e. a wasted contact
@@ -650,7 +682,7 @@ function dyntrans(sys_time)
 end
 export dyntrans
 
-## old contact matrix
+### old contact matrix
 # function contact_matrix()
 #     CM = Array{Array{Float64, 1}, 1}(undef, 4)
 #     CM[1]=[0.5712, 0.3214, 0.0722, 0.0353]
