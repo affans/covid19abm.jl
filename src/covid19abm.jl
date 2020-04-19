@@ -96,6 +96,9 @@ function main(ip::ModelParameters)
     _fpreiso = p.fpreiso
     p.fpreiso = 0
 
+    # split population in agegroups 
+    grps = get_ag_dist()
+
     # start the time loop
     for st = 1:p.modeltime
         # start of day
@@ -103,7 +106,8 @@ function main(ip::ModelParameters)
             p.fpreiso = _fpreiso
         end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        dyntrans(st) 
+        #dyntrans(st) 
+        dyntrans(st, grps)
         sw = time_update()
         # end of day
     end
@@ -279,6 +283,12 @@ function initialize()
     end
 end
 export initialize
+
+function get_ag_dist() 
+    # splits the initialized human pop into its age groups
+    grps =  map(x -> findall(y -> y.ag == x, humans), 1:length(agebraks)) 
+    return grps
+end
 
 function insert_infected(health, num, ag) 
     ## inserts a number of infected people in the population randomly
@@ -633,7 +643,83 @@ end
 end
 export ct_dynamics
 
-function dyntrans(sys_time)
+@inline function _get_betavalue(sys_time, xhealth) 
+    bf = p.β ## baseline PRE
+    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
+    if xhealth == ASYMP
+        bf = bf * 0.11
+    elseif xhealth == MILD || xhealth == MISO 
+        bf = bf * 0.44
+    elseif xhealth == INF || xhealth == IISO 
+        bf = bf * 0.89
+    end
+    return bf
+end
+export _get_betavalue
+
+function dyntrans(sys_time, grps)
+    totalinf = 0 # count number of new infected 
+    ## find all the people infectious
+    infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
+    
+    # get all people to meet and their daily contacts to recieve
+    # we can sample this at the start of the simulation to avoid everyday
+    tomeet = Array{Int64, 1}(undef, 10000)    
+    for i in 1:10000 
+        x = humans[i]
+        idx = x.idx 
+        ag = x.ag
+        cnt = 0
+        #if person is isolated, they can recieve only 3 maximum contacts
+        if x.iso 
+            cnt = rand() < 0.5 ? 0 : rand(1:3)
+        else 
+            cnt = rand(nbs[ag])  # expensive operation, try to optimize
+        end
+        tomeet[i] = cnt
+    end
+    
+    # go through every infectious person
+    for xid in infs 
+        x = humans[xid]
+        xhealth = x.health
+        cnts = tomeet[xid]
+        # split the counts over age groups
+        gpw = Int.(round.(cm[x.ag]*cnts)) 
+        for (i, g) in enumerate(gpw)
+            # sample the people from each group
+            meet = rand(grps[i], g)
+            # go through each person
+            for j in meet 
+                y = humans[j]
+                ycnt = tomeet[y.idx]                
+                
+                # tracing dynamics
+                if x.tracing  
+                    if y.tracedby == 0 
+                        y.tracedby = x.idx
+                        y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
+                    end
+                end
+                # tranmission dynamics
+                if ycnt > 0 && y.health == SUS && y.swap == UNDEF 
+                    tomeet[y.idx] = tomeet[y.idx] - 1 # remove a contact
+                    beta = _get_betavalue(sys_time, xhealth)
+                    if rand() < beta
+                        totalinf += 1
+                        y.swap = LAT
+                        y.exp = y.tis   ## force the move to latent in the next time step.
+                        y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
+                    end  
+                end
+            end
+        end
+    end
+    return totalinf
+end
+export dyntrans
+
+function dyntrans_nosus(sys_time)
     totalinf = 0
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)

@@ -162,10 +162,11 @@ end
     # 1) check if they are isolated through quarantine
     myp = cv.ModelParameters()   
     myp.eldq = 1.0  ## turn on eldq
+    myp.eldqag = 4
     cv.reset_params(myp)
     cv.initialize()    
     for x in cv.humans
-        if x.age >= 60 
+        if x.ag  == myp.eldqag 
             @test x.iso == true 
             @test x.isovia == :qu
         else 
@@ -192,20 +193,21 @@ end
 
 @testset "tranmission" begin
     cv.reset_params_default()
-    initialize()
+    cv.initialize()
+    grps = cv.get_ag_dist()
     
     # since beta = 0 default, and everyone sus
-    totalinf = dyntrans(1)  
+    totalinf = cv.dyntrans(1, grps)  
     @test totalinf == 0
 
     # check with only a single infected person 
     insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
-    totalinf = dyntrans(1)  
+    totalinf = cv.dyntrans(1, grps)  
     @test totalinf == 0 # still zero cuz beta = 0
 
     # now change beta 
     cv.reset_params(ModelParameters(β = 1.0))
-    totalinf = dyntrans(1)  
+    totalinf = cv.dyntrans(1, grps)  
     @test totalinf > 0 ## actually may still be zero because of stochasticity but very unliekly 
 
     ## somehow check the transmission reduction and number of contacts
@@ -224,6 +226,7 @@ end
     myp.initialinf = 1
     cv.reset_params(myp)
     cv.initialize()
+    grps = cv.get_ag_dist()
     cv.insert_infected(cv.PRE, 1, 4)
     # find the single insert_presymptomatic person
     h = findall(x -> x.health == cv.PRE, cv.humans)
@@ -232,7 +235,7 @@ end
     @test x.ag == 4
     @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF) ## always true for calibration 
     for i = 1:20 ## run for 20 days 
-        cv.dyntrans(i)
+        cv.dyntrans(i, grps)
         cv.time_update()
     end
     @test x.health == cv.REC  ## make sure the initial guy recovered
@@ -254,13 +257,14 @@ end
         x = cv.humans[i] 
         cv.ct_dynamics(x)
         @test x.tracing == false ## since fctcapture = 0.0
-        @test x.tracinguntil == 0
+        @test x.tracinguntil == -1
         @test x.tracedby == 0 
         @test x.tracedxp == 0
     end
 
     ## test the contact_tracing() function 
     cv.initialize()    
+    grps = cv.get_ag_dist()
     myp.fctcapture = 1.0 
     myp.fasymp = 0.0  # to force no asymp
     cv.reset_params(myp)
@@ -271,7 +275,7 @@ end
     @test tracer.tracing == true 
     @test tracer.tracinguntil == 3
 
-    cv.dyntrans(1) ## go through a single tranmission cycle
+    cv.dyntrans(1, grps) ## go through a single tranmission cycle
     alltraced = findall(x -> x.tracedby > 0, cv.humans) ## since we havn't turned fctcapture > 0
     @test length(alltraced) > 0
     for i in alltraced
