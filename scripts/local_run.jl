@@ -48,8 +48,8 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
-    c1 = Symbol.((:LAT, :ASYMP, :INF, :HOS, :ICU, :DED), :_INC)
-    c2 = Symbol.((:LAT, :ASYMP, :INF, :HOS, :ICU, :DED), :_PREV)
+    c1 = Symbol.((:LAT, :ASYMP, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
+    c2 = Symbol.((:LAT, :ASYMP, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
@@ -105,6 +105,7 @@ function savestr(p::ModelParameters, custominsert="/")
     rstr = replace(string(p.β), "." => "")
     prov = replace(string(p.prov), "." => "")
     eldr = replace(string(p.eldq), "." => "")
+    eldqag = replace(string(p.eldqag), "." => "") 
     fpre = replace(string(p.fpre), "." => "")
     fasymp = replace(string(p.fasymp), "." => "")
     fpreiso = replace(string(p.fpreiso), "." => "")
@@ -112,7 +113,7 @@ function savestr(p::ModelParameters, custominsert="/")
     fsev = replace(string(p.fsevere), "." => "")
     pct = replace(string(p.fctcapture), "." => "")
     tct = replace(string(p.maxtracedays), "." => "")
-    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_tct$(tct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_tct$(tct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 

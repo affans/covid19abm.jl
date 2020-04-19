@@ -32,6 +32,7 @@ end
     fmild::Float64 = 0.0  ## percent of people practice self-isolation
     fsevere::Float64 = 0.0 # fixed at 0.80
     eldq::Float64 = 0.0 ## complete isolation of elderly
+    eldqag::Int8 = 5 ## default age group, if quarantined(isolated) is ag 5. 
     fasymp::Float64 = 0.50 ## percent going to asymp
     fpre::Float64 = 1.0 ## percent going to presymptomatic
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
@@ -271,7 +272,7 @@ function initialize()
         x.ag = rand(agedist)
         x.age = rand(agebraks[x.ag]) 
         x.exp = 999  ## susceptible people don't expire.
-        if rand() < p.eldq && x.age >= 60  ## check if elderly need to be quarantined.
+        if rand() < p.eldq && x.ag == p.eldqag   ## check if elderly need to be quarantined.
             x.iso = true   
             x.isovia = :qu         
         end
@@ -349,7 +350,7 @@ end
 function move_to_latent(x::Human)
     ## transfers human h to the incubation period and samples the duration
     σ = LogNormal(log(5.2), 0.1) # duration of incubation period 
-    θ = (0.8, 0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
+    θ = (0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = LAT
     x.tis = 0   # reset time in state 
 
@@ -358,15 +359,25 @@ function move_to_latent(x::Human)
         x.swap = PRE
         x.exp = Int(round(rand(σ))) - 1
     else 
-        if rand() < θ[x.ag]
-            if rand() < p.fasymp 
-                x.swap = ASYMP
+        # if changing this code, change in move_in_pre also
+        if rand() < p.fasymp
+            x.swap = ASYMP
+        else
+            if rand() < θ[x.ag]
+                x.swap = MILD
             else 
-                x.swap = MILD 
-            end        
-        else 
-            x.swap = INF
+                x.swap = INF
+            end
         end
+        # if rand() < θ[x.ag]
+        #     if rand() < p.fasymp 
+        #         x.swap = ASYMP
+        #     else 
+        #         x.swap = MILD 
+        #     end        
+        # else 
+        #     x.swap = INF
+        # end
         x.exp = Int(round(rand(σ)))
     end
     if p.calibration ## in calibration mode, latent people never become infectious.
@@ -375,10 +386,8 @@ function move_to_latent(x::Human)
     end
     x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
-export move_to_latent
-
 function move_to_pre(x::Human)
-    θ = (0.8, 0.8, 0.8, 0.4, 0.2)  # percentage of sick individuals going to mild infection stage
+    θ = (0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = PRE
     x.tis = 0   # reset time in state 
     x.exp = 1   # one day in presymptomatic
@@ -388,17 +397,28 @@ function move_to_pre(x::Human)
 
     # the reason why we can't move to MILD/MISO and INF/IISO here is that, 
     # particularly, for inf we need to check for hospitalization
-    if rand() < θ[x.ag]
-        if rand() < p.fasymp 
-            x.swap = ASYMP
+    # if changing this code, change in move_in_latent also
+    if rand() < p.fasymp
+        x.swap = ASYMP
+    else
+        if rand() < θ[x.ag]
+            x.swap = MILD
         else 
-            x.swap = MILD 
-        end        
-    else 
-        x.swap = INF
+            x.swap = INF
+        end
     end
+    # if rand() < θ[x.ag]
+    #     if rand() < p.fasymp 
+    #         x.swap = ASYMP
+    #     else 
+    #         x.swap = MILD 
+    #     end        
+    # else 
+    #     x.swap = INF
+    # end
 end
 export move_to_pre
+export move_to_latent
 
 function move_to_asymp(x::Human)
      ## transfers human h to the asymptomatic stage 
@@ -634,7 +654,7 @@ function dyntrans(sys_time)
         else 
             cnt = rand(nbs[ag])  ## get number of contacts/day
         end
-        cnt >= length(tomeet[ag]) && error("error here")
+        #cnt >= length(tomeet[ag]) && error("error here")
         
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 
