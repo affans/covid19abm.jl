@@ -129,7 +129,7 @@ export reset_params, reset_params_default
 function _model_check() 
     ## checks model parameters before running 
     (p.fctcapture > 0 && p.fpreiso > 0) && error("Can not do contact tracing and ID/ISO of pre at the same time.")
-    #tracinguntil can not be zero
+    (p.fctcapture > 0 && p.maxtracedays == 0) && error("maxtracedays can not be zero")
 end
 
 ## Data Collection/ Model State functions
@@ -227,7 +227,7 @@ function _count_ct_numbers()
     howmanytrc = 0 # how many traced (num / (inf + mild) ~ percentage)
     howmanyisoct = 0 # how many isolated (of all sick people) (contact tracing)
     howmanyisopi = 0 # how many isolated (of all sick people) (through presymp)
-  
+    howmanyiso = 0
     for x in humans 
         if x.tracinguntil >= 0
             howmanytrc += 1       
@@ -238,8 +238,11 @@ function _count_ct_numbers()
         if x.isovia == :pi && x.health != SUS 
             howmanyisopi += 1
         end
+        if x.isovia != :null && x.health != SUS 
+            howmanyiso += 1 
     end
-    return howmanytrc, howmanyisoct, howmanyisopi
+end
+    return howmanytrc, howmanyiso, howmanyisoct, howmanyisopi
 end
 export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors, _count_ct_numbers
 
@@ -614,22 +617,27 @@ end
 
     # everyday remove a day
     if x.tracing 
+        ## check if person is still infectious 
+        (xh == SUS || xh == LAT || xh == ASYMP || xh == REC || xh == DED) && error("can not trace this person")
         x.tracinguntil -= 1
-        if x.tracinguntil == 0 ## agent identified, make all contacts isolate
+        if x.tracinguntil == 0 ## agent identified, make all contacts isolate,including the agent
+            _set_isolation(x, true, :ct)
             x.tracing = false
             alltraced = findall(y -> y.tracedby == x.idx, humans)
             for i in alltraced
                 y = humans[i]
+                if y.health in (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO)
                 _set_isolation(y, true, :ct)
             end            
         end
+    end
     end
 
     # when the person is a new PRE, check for whether we will trace 
     if xh == PRE && xs != ASYMP && x.tis == 0 
         if rand() < p.fctcapture
             x.tracing = true
-            x.tracinguntil = p.maxtracedays ## trace for this many days
+            x.tracinguntil = p.maxtracedays + 1 ## trace for this many days. +1 because you cant trace in PRE which is one day
         end
     end
 
@@ -694,16 +702,21 @@ function dyntrans(sys_time, grps)
                 y = humans[j]
                 ycnt = tomeet[y.idx]                
                 
+                if ycnt > 0 
+                    tomeet[y.idx] = tomeet[y.idx] - 1 # remove a contact
+                    # there is a contact to recieve
                 # tracing dynamics
+                    
+                    # an infected person can meet ANYONE, but make sure you isolate the correct people
                 if x.tracing  
                     if y.tracedby == 0 
                         y.tracedby = x.idx
                         y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
                     end
                 end
+                    
                 # tranmission dynamics
-                if ycnt > 0 && y.health == SUS && y.swap == UNDEF 
-                    tomeet[y.idx] = tomeet[y.idx] - 1 # remove a contact
+                    if  y.health == SUS && y.swap == UNDEF                  
                     beta = _get_betavalue(sys_time, xhealth)
                     if rand() < beta
                         totalinf += 1
@@ -712,6 +725,9 @@ function dyntrans(sys_time, grps)
                         y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
                     end  
                 end
+
+                end
+                
             end
         end
     end
