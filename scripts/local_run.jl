@@ -35,16 +35,22 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
     ## stack the sims together
     allag = vcat([cdr[i].a  for i = 1:nsims]...)
-    mp = vcat([cdr[i].g1 for i = 1:nsims]...)
-    po = vcat([cdr[i].g2 for i = 1:nsims]...)
-    im = vcat([cdr[i].g3 for i = 1:nsims]...)
-    en = vcat([cdr[i].g4 for i = 1:nsims]...)
-    ma = vcat([cdr[i].g5 for i = 1:nsims]...)
-    pr = vcat([cdr[i].g7 for i = 1:nsims]...)
-    si = vcat([cdr[i].g7 for i = 1:nsims]...)
-    wa = vcat([cdr[i].g8 for i = 1:nsims]...)
+    g1 = vcat([cdr[i].g1 for i = 1:nsims]...)
+    g2 = vcat([cdr[i].g2 for i = 1:nsims]...)
+    g3 = vcat([cdr[i].g3 for i = 1:nsims]...)
+    g4 = vcat([cdr[i].g4 for i = 1:nsims]...)
+    g5 = vcat([cdr[i].g5 for i = 1:nsims]...)
+    g6 = vcat([cdr[i].g6 for i = 1:nsims]...)
+    g7 = vcat([cdr[i].g7 for i = 1:nsims]...)
+    g8 = vcat([cdr[i].g8 for i = 1:nsims]...)
+    g9 = vcat([cdr[i].g9 for i = 1:nsims]...)
+    g10 = vcat([cdr[i].g10 for i = 1:nsims]...)
+    g11 = vcat([cdr[i].g11 for i = 1:nsims]...)
+    g12 = vcat([cdr[i].g12 for i = 1:nsims]...)
+
    
-    mydfs = Dict("all" => allag, "c1" => mp, "c2" => po, "c3" => im, "c4" => en, "c5" => ma, "c6" => pr, "c7" => si, "c8" => wa)
+    mydfs = Dict("all" => allag, "c1" => g1, "c2" => g2, "c3" => g3, "c4" => g4, "c5" => g5, "c6" => g6, "c7" => g7, "c8" => g8,
+                    "c9" => g9, "c10" => g10, "c11" => g11, "c12" => g12)
     #mydfs = Dict("all" => allag)
     
     ## save at the simulation and time level
