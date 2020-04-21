@@ -39,12 +39,12 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 1042
+const HSIZE = 816
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
-const bhpdist = @SVector [22, 346, 7, 23, 352, 261, 15, 16]
-const bhpcats = @SVector [:mp, :po, :im, :en, :ma, :pr, :si, :wa]
+const bhpdist = @SVector [8, 164, 149, 34, 34, 161, 80, 80, 60, 9, 19, 18]
+const bhpcats = @SVector [:c1, :c2, :c3, :c4, :c5, :c6, :c7, :c8, :c9, :c10, :c11, :c12]
 
 export ModelParameters, HEALTH, Human, humans
 
@@ -68,25 +68,34 @@ function runsim(simnum, ip::ModelParameters)
 
     all = _collectdf(hmatrix)
     spl = _splitstate(hmatrix, ags)
-    mp = _collectdf(spl[1])
-    po = _collectdf(spl[2])
-    im = _collectdf(spl[3])
-    en = _collectdf(spl[4])
-    ma = _collectdf(spl[5])
-    pr = _collectdf(spl[6])
-    si = _collectdf(spl[7])
-    wa = _collectdf(spl[8])
+    g1 = _collectdf(spl[1])
+    g2 = _collectdf(spl[2])
+    g3 = _collectdf(spl[3])
+    g4 = _collectdf(spl[4])
+    g5 = _collectdf(spl[5])
+    g6 = _collectdf(spl[6])
+    g7 = _collectdf(spl[7])
+    g8 = _collectdf(spl[8])
+    g9 = _collectdf(spl[9])
+    g10 = _collectdf(spl[10])
+    g11 = _collectdf(spl[11])
+    g12 = _collectdf(spl[12])
 
     insertcols!(all, 1, :sim => simnum);    
-    insertcols!(mp, 1, :sim => simnum); 
-    insertcols!(po, 1, :sim => simnum); 
-    insertcols!(im, 1, :sim => simnum); 
-    insertcols!(en, 1, :sim => simnum); 
-    insertcols!(ma, 1, :sim => simnum); 
-    insertcols!(pr, 1, :sim => simnum); 
-    insertcols!(si, 1, :sim => simnum); 
-    insertcols!(wa, 1, :sim => simnum); 
-    return (a=all, g1=mp, g2=po, g3=im, g4=en, g5=ma, g6=pr, g7=si, g8=wa, infectors=infectors, bhpsicks=(sr1, sr2))
+    insertcols!(g1, 1, :sim => simnum); 
+    insertcols!(g2, 1, :sim => simnum); 
+    insertcols!(g3, 1, :sim => simnum); 
+    insertcols!(g4, 1, :sim => simnum); 
+    insertcols!(g5, 1, :sim => simnum); 
+    insertcols!(g6, 1, :sim => simnum); 
+    insertcols!(g7, 1, :sim => simnum); 
+    insertcols!(g8, 1, :sim => simnum); 
+    insertcols!(g9, 1, :sim => simnum); 
+    insertcols!(g10, 1, :sim => simnum); 
+    insertcols!(g11, 1, :sim => simnum); 
+    insertcols!(g12, 1, :sim => simnum); 
+    return (a=all, g1=g1, g2=g2, g3=g3, g4=g4, g5=g5, g6=g6, g7=g7, g8=g8, g9=g9, g10=g10, g11=g11, g12=g12, infectors=infectors, bhpsicks=(sr1, sr2))
+
 end
 export runsim
 
@@ -572,10 +581,10 @@ function dyntrans()
         ih = x.health
 
         # get rule 1 and 2 matrices
-        nbs1 = bhp_rule1_contacts()
-        nbs2 = bhp_rule2_contacts()
-        cm1 = bhp_rule1_matrix()
-        cm2 = bhp_rule2_matrix()
+        nbs1 = pt_rule1_contacts()
+        nbs2 = pt_rule2_contacts()
+        cm1 = pt_rule1_matrix()
+        cm2 = pt_rule2_matrix()
         if x.iso ## isolated infectious person has limited contacts
             cnt = rand(1:3)
         else 
@@ -729,6 +738,50 @@ function bhp_rule2_matrix()
     return dd
 end
 
+function pt_rule2_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))       
+    CM[1] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
+    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+    CM[7] = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+    CM[9] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+    CM[10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
+    CM[11] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => CM[i])
+    end 
+    return dd
+end
+
+function pt_rule1_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
+    CM[1] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[2] = [0, 0.977272727, 0, 0, 0, 0, 0.022727273, 0, 0, 0, 0, 0]
+    CM[3] = [0, 0, 0.97826087, 0, 0, 0, 0, 0.02173913, 0, 0, 0, 0]
+    CM[4] = [0, 0, 0, 0.967741935, 0, 0, 0.032258065, 0, 0, 0, 0, 0]
+    CM[5] = [0, 0, 0, 0, 0.967741935, 0, 0.00, 0.032258065, 0, 0, 0, 0]
+    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+    CM[7] = [0, 0.041666667, 0, 0.020833333, 0, 0, 0.9375, 0, 0, 0, 0, 0]
+    CM[8] = [0, 0, 0.041666667, 0, 0.020833333, 0, 0, 0.9375, 0, 0, 0, 0]
+    CM[9] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+    CM[10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[11] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => CM[i])
+    end 
+    return dd
+end
+
 function negative_binomials() 
     ## the means/sd here are calculated using _calc_avgag
     means = [10.21, 16.793, 13.7950, 11.2669, 8.0027]
@@ -778,6 +831,29 @@ function bhp_rule2_contacts()
     end
     return dd
 end
+
+function pt_rule1_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    #means = [0, 2, 0, 0, 1, 2, 0, 38]
+    lb = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    hb = [0, 1, 1, 2, 2, 1, 1, 1, 1, 0, 0, 0]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+
+function pt_rule2_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    #means = [0, 3, 0, 0, 0, 3, 0, 0]
+    lb = [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0]
+    hb = [0, 1, 1, 2, 2, 1, 1, 1, 1, 1, 0, 0]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+
 
 ## internal functions to do intermediate calculations
 function _calc_avgag(lb, hb) 
