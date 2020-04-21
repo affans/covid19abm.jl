@@ -33,6 +33,8 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     println("total size of simulation dataframes: $(Base.summarysize(cdr))")
     ## write the infectors 
     writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
+    ## write bhp sicks
+    writedlm("$(folderprefix)/bhpsicks.dat", [cdr[i].bhpsicks for i = 1:nsims])  
     ## stack the sims together
     allag = vcat([cdr[i].a  for i = 1:nsims]...)
     mp = vcat([cdr[i].g1 for i = 1:nsims]...)
@@ -40,7 +42,7 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     im = vcat([cdr[i].g3 for i = 1:nsims]...)
     en = vcat([cdr[i].g4 for i = 1:nsims]...)
     ma = vcat([cdr[i].g5 for i = 1:nsims]...)
-    pr = vcat([cdr[i].g7 for i = 1:nsims]...)
+    pr = vcat([cdr[i].g6 for i = 1:nsims]...)
     si = vcat([cdr[i].g7 for i = 1:nsims]...)
     wa = vcat([cdr[i].g8 for i = 1:nsims]...)
    
@@ -215,4 +217,3 @@ end
 
 # http://juliaplots.org/MakieReferenceImages/gallery//lots_of_heatmaps/index.html
 # http://juliaplots.org/MakieReferenceImages/gallery//chess_game/index.html
-

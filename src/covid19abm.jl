@@ -15,6 +15,7 @@ Base.@kwdef mutable struct Human
     iso::Bool = false  ## isolated (limited contacts)
     icu::Bool = false ## is going to be in icu?
     bhpcat::Symbol = :none
+    bhpsick::Int64 = 0
 end
 
 ## default system parameters
@@ -55,6 +56,16 @@ function runsim(simnum, ip::ModelParameters)
     # get simulation age groups
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
 
+    ## count bhp sick from
+    sr1 = sr2 = 0
+    for x in humans 
+        if x.bhpsick == 1
+            sr1 +=1 
+        elseif x.bhpsick == 2
+            sr2 += 1
+        end
+    end
+
     all = _collectdf(hmatrix)
     spl = _splitstate(hmatrix, ags)
     mp = _collectdf(spl[1])
@@ -75,7 +86,7 @@ function runsim(simnum, ip::ModelParameters)
     insertcols!(pr, 1, :sim => simnum); 
     insertcols!(si, 1, :sim => simnum); 
     insertcols!(wa, 1, :sim => simnum); 
-    return (a=all, g1=mp, g2=po, g3=im, g4=en, g5=ma, g6=pr, g7=si, g8=wa, infectors=infectors)
+    return (a=all, g1=mp, g2=po, g3=im, g4=en, g5=ma, g6=pr, g7=si, g8=wa, infectors=infectors, bhpsicks=(sr1, sr2))
 end
 export runsim
 
@@ -91,13 +102,12 @@ function main(ip::ModelParameters)
     initialize() # initialize population
     # insert initial infected agents into the model
     # and setup the right swap function. 
-    # [:mp, :po, :im, :en, :ma, :pr, :si, :wa]
     if p.calibration 
         insert_infected(PRE, p.initialinf, rand(bhpcats)) ## for calibration, insert in random 
     else 
         insert_infected(LAT, p.initialinf, p.bhpinitialcat) ## for main simulations, insert in category
-    end    
-    
+    end  
+
     ## save the preisolation isolation parameters
     _fpreiso = p.fpreiso
     p.fpreiso = 0
@@ -560,44 +570,79 @@ function dyntrans()
         x = humans[xid]
         ag = x.bhpcat  
         ih = x.health
+
+        # get rule 1 and 2 matrices
+        nbs1 = bhp_rule1_contacts()
+        nbs2 = bhp_rule2_contacts()
+        cm1 = bhp_rule1_matrix()
+        cm2 = bhp_rule2_matrix()
         if x.iso ## isolated infectious person has limited contacts
             cnt = rand(1:3)
         else 
-            cnt = rand(nbs[ag])  ## get number of contacts/day
+            ## get two counts ... one for rule 1 and one for rule 2
+            cnt1 = rand(nbs1[ag])  ## get number of contacts/day
+            cnt2 = rand(nbs2[ag])  ## get number of contacts/day
         end
         #cnt >= length(tomeet[ag]) && error("error here")
         
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 
         # going from cnt to the gpw array might remove a contact or two due to rounding. 
-        gpw = Int.(round.(cm[ag]*cnt)) 
+        gpw1 = Int.(round.(cm1[ag]*cnt1)) 
+        gpw2 = Int.(round.(cm2[ag]*cnt2)) 
         #println("cnt: $cnt, gpw: $gpw")
         # let's stratify the human population in it's age groups. 
         # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
         # enumerate over the 15 groups and randomly select contacts from each group
-        for (i, g) in enumerate(gpw)
-            if length(tomeet[i]) > 0   
-                meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
-                ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
-                for j in meet
-                    y = humans[j]
-                    if y.health == SUS && y.swap == UNDEF
-                        bf = p.β ## baseline PRE
-                        # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
-                        if ih == ASYMP
-                            bf = bf * 0.11
-                        elseif ih == MILD || ih == MISO 
-                            bf = bf * 0.44
-                        elseif ih == INF || ih == IISO 
-                            bf = bf * 0.89
-                        end
-                        if rand() < bf
-                            totalinf += 1
-                            y.swap = LAT
-                            y.exp = y.tis   ## force the move to latent in the next time step.
-                            y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
-                        end  
+        for (i, g) in enumerate(gpw1)
+            (g == 0 || length(tomeet[i]) == 0) && continue
+            meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
+            ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
+            for j in meet
+                y = humans[j]
+                if y.health == SUS && y.swap == UNDEF
+                    bf = p.β ## baseline PRE
+                    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
+                    if ih == ASYMP
+                        bf = bf * 0.11
+                    elseif ih == MILD || ih == MISO 
+                        bf = bf * 0.44
+                    elseif ih == INF || ih == IISO 
+                        bf = bf * 0.89
                     end
+                    if rand() < bf
+                        totalinf += 1
+                        y.swap = LAT
+                        y.exp = y.tis   ## force the move to latent in the next time step.
+                        y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
+                        y.bhpsick = 1
+                    end  
+                end
+            end            
+        end
+        for (i, g) in enumerate(gpw2)
+            (g == 0 || length(tomeet[i]) == 0) && continue
+            meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
+            ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
+            for j in meet
+                y = humans[j]
+                if y.health == SUS && y.swap == UNDEF
+                    bf = p.β ## baseline PRE
+                    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
+                    if ih == ASYMP
+                        bf = bf * 0.11
+                    elseif ih == MILD || ih == MISO 
+                        bf = bf * 0.44
+                    elseif ih == INF || ih == IISO 
+                        bf = bf * 0.89
+                    end
+                    if rand() < bf
+                        totalinf += 1
+                        y.swap = LAT
+                        y.exp = y.tis   ## force the move to latent in the next time step.
+                        y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
+                        y.bhpsick = 2
+                    end  
                 end
             end            
         end
@@ -605,6 +650,7 @@ function dyntrans()
     return totalinf 
 end
 export dyntrans
+
 
 ## old contact matrix
 # function contact_matrix()
@@ -646,9 +692,42 @@ function bhp_matrix()
     return dd
 end
 const cm = bhp_matrix()
-# 
-# calibrate for 2.7 r0
-# 20% selfisolation, tau 1 and 2.
+
+function bhp_rule1_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, 8)       
+    CM[1] = [1, 0, 0, 0, 0, 0, 0, 0]
+    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0]
+    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0]
+    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0]
+    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0]
+    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0]
+    CM[7] = [0, 0, 0, 0, 0, 0, 0, 0]
+    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1]
+    for i = 1:8
+        push!(dd, bhpcats[i] => CM[i])
+    end 
+    return dd
+end
+
+function bhp_rule2_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, 8)    
+    CM[1] = [1, 0, 0, 0, 0, 0, 0, 0]
+    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0]
+    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0]
+    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0]
+    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0]
+    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0]
+    CM[7] = [0, 0, 0, 0, 0, 0, 0, 0]
+    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1]
+    for i = 1:8
+        push!(dd, bhpcats[i] => CM[i])
+    end 
+    return dd
+end
 
 function negative_binomials() 
     ## the means/sd here are calculated using _calc_avgag
@@ -677,6 +756,28 @@ end
 const nbs = bhp_binomials()
 export negative_binomials, contact_matrix, nbs, cm
 
+
+function bhp_rule1_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    means = [0, 2, 0, 0, 1, 2, 0, 38]
+    lb = [0, 1, 0, 0, 0, 1, 0, 35]
+    hb = [1, 2, 1, 1, 1, 2, 0, 40]
+    for i = 1:8
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+
+function bhp_rule2_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    means = [0, 3, 0, 0, 0, 3, 0, 0]
+    lb = [0, 2, 0, 0, 0, 2, 0, 0]
+    hb = [1, 4, 1, 1, 1, 4, 0, 1]
+    for i = 1:8
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
 
 ## internal functions to do intermediate calculations
 function _calc_avgag(lb, hb) 
