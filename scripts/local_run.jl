@@ -106,14 +106,15 @@ function savestr(p::ModelParameters, custominsert="/")
     prov = replace(string(p.prov), "." => "")
     eldr = replace(string(p.eldq), "." => "")
     eldqag = replace(string(p.eldqag), "." => "") 
-    fpre = replace(string(p.fpre), "." => "")
+    #fpre = replace(string(p.fpre), "." => "")
     fasymp = replace(string(p.fasymp), "." => "")
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fsev = replace(string(p.fsevere), "." => "")
     pct = replace(string(p.fctcapture), "." => "")
-    tct = replace(string(p.maxtracedays), "." => "")
-    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_tct$(tct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_pre$(fpre)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    tct = replace(string(p.maxtracedays), "." => "") 
+    frelasymp = replace(string(p.frelasymp), "." => "")
+    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_tct$(tct)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 

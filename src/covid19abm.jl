@@ -11,7 +11,8 @@ Base.@kwdef mutable struct Human
     age::Int64   = 0    # in years. don't really need this but left it incase needed later
     ag::Int64    = 0
     tis::Int64   = 0   # time in state 
-    exp::Int64   = 0    # max statetime
+    exp::Int64   = 0   # max statetime
+    dur::NTuple{4, Int8} = (0, 0, 0, 0)   # Order: (latents, asymps, pres, infs) TURN TO NAMED TUPS LATER
     iso::Bool = false  ## isolated (limited contacts)
     isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)
     icu::Bool = false ## is going to be in icu?
@@ -19,6 +20,11 @@ Base.@kwdef mutable struct Human
     tracinguntil::Int8 = -1 ## how many days a symptomatic contacts are traced, setting it to -1 allows us to figure out who was traced
     tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
     tracedxp::UInt16 = 0 ## if the person that is traced is sus after 14 days, the isolation is turned off. 
+end
+
+Base.@kwdef mutable struct tt
+    idx::Int64 = 0 
+    dur::NTuple{4, Int8} = (lat=0, exp=0, scp=0, asp=0)  
 end
 
 ## default system parameters
@@ -34,9 +40,10 @@ end
     eldq::Float64 = 0.0 ## complete isolation of elderly
     eldqag::Int8 = 5 ## default age group, if quarantined(isolated) is ag 5. 
     fasymp::Float64 = 0.50 ## percent going to asymp
-    fpre::Float64 = 1.0 ## percent going to presymptomatic
+    fpre::Float64 = 1.0 ## NOT USED ANYMORE (percent going to presymptomatic)
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
+    frelasymp::Float64 = 0.11 ## relative transmission of asymptomatic
     fctcapture::Float16 = 0.0 ## how many of contacts of the infected are we tracing.     
     maxtracedays::Int8 = 3 ## how many days to trace of 
 end
@@ -108,6 +115,7 @@ function main(ip::ModelParameters)
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
         #dyntrans(st) 
         dyntrans(st, grps)
+        #dyntrans_nosus(st)
         sw = time_update()
         # end of day
     end
@@ -279,6 +287,7 @@ function initialize()
         x.ag = rand(agedist)
         x.age = rand(agebraks[x.ag]) 
         x.exp = 999  ## susceptible people don't expire.
+        x.dur = sample_epi_durations() # sample epi periods   
         if rand() < p.eldq && x.ag == p.eldqag   ## check if elderly need to be quarantined.
             x.iso = true   
             x.isovia = :qu         
@@ -360,97 +369,69 @@ export time_update
     x.isovia == :null && (x.isovia = via)
 end
 
+function sample_epi_durations()
+    # when a person is sick, samples the 
+    lat_dist = truncated(LogNormal(log(5.2), 0.1), 4, 7) # truncated between 4 and 7
+    pre_dist = truncated(Gamma(1.058, 5/2.3), 0.8, 3)#truncated between 0.8 and 3
+    asy_dist = Gamma(5, 1)
+    inf_dist = Gamma((3.2)^2/3.7, 3.7/3.2)
+
+    latents = Int.(round.(rand(lat_dist)))
+    pres = Int.(round.(rand(pre_dist)))
+    latents = latents - pres # ofcourse substract from latents, the presymp periods
+    asymps = Int.(ceil.(rand(asy_dist)))
+    infs = Int.(ceil.(rand(inf_dist)))
+    return (latents, asymps, pres, infs)
+end
+
 function move_to_latent(x::Human)
     ## transfers human h to the incubation period and samples the duration
-    σ = LogNormal(log(5.2), 0.1) # duration of incubation period 
-    θ = (0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = LAT
     x.tis = 0   # reset time in state 
+    x.exp = x.dur[1] # get the latent period
+    x.swap = rand() < p.fasymp ? ASYMP : PRE 
 
-    ## set up swap
-    if rand() < p.fpre
-        x.swap = PRE
-        x.exp = Int(round(rand(σ))) - 1
-    else 
-        # if changing this code, change in move_in_pre also
-        if rand() < p.fasymp
-            x.swap = ASYMP
-        else
-            if rand() < θ[x.ag]
-                x.swap = MILD
-            else 
-                x.swap = INF
-            end
-        end
-        # if rand() < θ[x.ag]
-        #     if rand() < p.fasymp 
-        #         x.swap = ASYMP
-        #     else 
-        #         x.swap = MILD 
-        #     end        
-        # else 
-        #     x.swap = INF
-        # end
-        x.exp = Int(round(rand(σ)))
-    end
-    if p.calibration ## in calibration mode, latent people never become infectious.
+    ## in calibration mode, latent people never become infectious.
+    if p.calibration 
         x.swap = LAT 
         x.exp = 999
     end
     x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
+export move_to_latent
+
+function move_to_asymp(x::Human)
+    ## transfers human h to the asymptomatic stage 
+    x.health = ASYMP     
+    x.tis = 0 
+    x.exp = x.dur[2] # get the presymptomatic period
+    x.swap = REC 
+    # x.iso property remains from either the latent or presymptomatic class
+    # if x.iso is true, the asymptomatic individual has limited contacts
+end
+export move_to_asymp
+
 function move_to_pre(x::Human)
     θ = (0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = PRE
     x.tis = 0   # reset time in state 
-    x.exp = 1   # one day in presymptomatic
+    x.exp = x.dur[3] # get the presymptomatic period
 
+    if rand() < θ[x.ag]
+        x.swap = MILD
+    else 
+        x.swap = INF
+    end
     # calculate whether person is isolated
     rand() < p.fpreiso && _set_isolation(x, true, :pi)
-
-    # the reason why we can't move to MILD/MISO and INF/IISO here is that, 
-    # particularly, for inf we need to check for hospitalization
-    # if changing this code, change in move_in_latent also
-    if rand() < p.fasymp
-        x.swap = ASYMP
-    else
-        if rand() < θ[x.ag]
-            x.swap = MILD
-        else 
-            x.swap = INF
-        end
-    end
-    # if rand() < θ[x.ag]
-    #     if rand() < p.fasymp 
-    #         x.swap = ASYMP
-    #     else 
-    #         x.swap = MILD 
-    #     end        
-    # else 
-    #     x.swap = INF
-    # end
 end
 export move_to_pre
-export move_to_latent
-
-function move_to_asymp(x::Human)
-     ## transfers human h to the asymptomatic stage 
-     γ = 5 
-     x.health = ASYMP     
-     x.tis = 0 
-     x.exp = γ
-     x.swap = REC 
-     # x.iso property remains from either the latent or presymptomatic class
-     # if x.iso is true, the asymptomatic individual has limited contacts
-end
-export move_to_asymp
 
 function move_to_mild(x::Human)
     ## transfers human h to the mild infection stage for γ days
-    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
     x.health = MILD     
     x.tis = 0 
-    x.exp = γ
+    x.exp = x.dur[4]
     x.swap = REC 
     # x.iso property remains from either the latent or presymptomatic class
     # if x.iso is true, staying in MILD is same as MISO since contacts will be limited. 
@@ -467,12 +448,10 @@ export move_to_mild
 
 function move_to_miso(x::Human)
     ## transfers human h to the mild isolated infection stage for γ days
-    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
-    oldexp = x.exp  ## tau amount of days spent in isolation as infectious already.
     x.health = MISO
     x.swap = REC
     x.tis = 0 
-    x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious but it dosn't really matter
+    x.exp = x.dur[4] - p.τmild  ## since tau amount of days was already spent as infectious
     _set_isolation(x, true, :mi) 
 end
 export move_to_miso
@@ -481,10 +460,10 @@ function move_to_infsimple(x::Human)
     ## transfers human h to the severe infection stage for γ days 
     ## simplified function for calibration/general purposes
     x.health = INF
-    x.swap = REC
     x.tis = 0 
-    x.iso = false 
-    x.exp = 5  ## change if needed.   
+    x.exp = x.dur[4]
+    x.swap = REC 
+    _set_isolation(x, false, :null) 
 end
 
 function move_to_inf(x::Human)
@@ -497,26 +476,25 @@ function move_to_inf(x::Human)
     mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]     # death rate for severe cases.
     
     if p.calibration
-        h =  (0, 0, 0, 0)
-        c =  (0, 0, 0, 0)
-        mh = (0, 0, 0, 0)
+        h =  (0, 0, 0, 0, 0)
+        c =  (0, 0, 0, 0, 0)
+        mh = (0, 0, 0, 0, 0)
     end
 
-    δ = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
-    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
-
+    time_to_hospital = Int(round(rand(Uniform(2, 5)))) # duration symptom onset to hospitalization
+   
     x.health = INF
     x.swap = UNDEF
     x.tis = 0 
     if rand() < h[x.ag]     # going to hospital or ICU but will spend delta time transmissing the disease with full contacts 
-        x.exp = δ     
+        x.exp = time_to_hospital    
         x.swap = rand() < c[x.ag] ? ICU : HOS        
     else ## no hospital for this lucky (but severe) individual 
         if rand() < mh[x.ag]
-            x.exp = γ   
+            x.exp = x.dur[4]  
             x.swap = DED
         else 
-            x.exp = γ  # as in the other functions.  
+            x.exp = x.dur[4]  
             x.swap = REC
             if x.iso || rand() < p.fsevere 
                 x.exp = 1  ## 1 day isolation for severe cases     
@@ -530,12 +508,10 @@ end
 
 function move_to_iiso(x::Human)
     ## transfers human h to the sever isolated infection stage for γ days
-    γ = 5 # duration symptom onset to recovery, assumed fixed, based on serial interval... sampling creates a problem negative numbers
-    oldexp = x.exp
     x.health = IISO   
     x.swap = REC
     x.tis = 0     ## reset time in state 
-    x.exp = γ - oldexp  ## since tau amount of days was already spent as infectious 
+    x.exp = x.dur[4] - 1  ## since 1 day was spent as infectious
     _set_isolation(x, true, :mi)
 end 
 
@@ -655,7 +631,7 @@ export ct_dynamics
     bf = p.β ## baseline PRE
     # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
     if xhealth == ASYMP
-        bf = bf * 0.11
+        bf = bf * p.frelasymp
     elseif xhealth == MILD || xhealth == MISO 
         bf = bf * 0.44
     elseif xhealth == INF || xhealth == IISO 
@@ -672,8 +648,8 @@ function dyntrans(sys_time, grps)
     
     # get all people to meet and their daily contacts to recieve
     # we can sample this at the start of the simulation to avoid everyday
-    tomeet = Array{Int64, 1}(undef, 10000)    
-    for i in 1:10000 
+    tomeet = Array{Int64, 1}(undef, HSIZE)    
+    for i in 1:HSIZE 
         x = humans[i]
         idx = x.idx 
         ag = x.ag
