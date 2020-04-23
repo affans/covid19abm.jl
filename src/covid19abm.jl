@@ -13,13 +13,14 @@ Base.@kwdef mutable struct Human
     tis::Int64   = 0   # time in state 
     exp::Int64   = 0   # max statetime
     dur::NTuple{4, Int8} = (0, 0, 0, 0)   # Order: (latents, asymps, pres, infs) TURN TO NAMED TUPS LATER
+    doi::Int32   = 999   # day of infection.
     iso::Bool = false  ## isolated (limited contacts)
-    isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)
-    icu::Bool = false ## is going to be in icu?
+    isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)    
     tracing::Bool = false ## are we tracing contacts for this individual?
-    tracinguntil::Int8 = -1 ## how many days a symptomatic contacts are traced, setting it to -1 allows us to figure out who was traced
+    tracestart::Int8 = -1 ## when to start tracing, based on values sampled for x.dur
+    traceend::Int8 = -1 ## when to end tracing
     tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
-    tracedxp::UInt16 = 0 ## if the person that is traced is sus after 14 days, the isolation is turned off. 
+    tracedxp::UInt16 = 0 ## the trace is killed after tracedxp amount of days
 end
 
 Base.@kwdef mutable struct tt
@@ -44,8 +45,10 @@ end
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
     frelasymp::Float64 = 0.11 ## relative transmission of asymptomatic
-    fctcapture::Float16 = 0.0 ## how many of contacts of the infected are we tracing.     
-    maxtracedays::Int8 = 3 ## how many days to trace of 
+    fctcapture::Float16 = 0.0 ## how many symptomatic people identified
+    fcontactst::Float16 = 0.0 ## fraction of contacts being isolated/quarantined
+    cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
+    cdaysback::Int8 = 0 ## number of days to go back and collect contacts
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -237,7 +240,7 @@ function _count_ct_numbers()
     howmanyisopi = 0 # how many isolated (of all sick people) (through presymp)
     howmanyiso = 0
     for x in humans 
-        if x.tracinguntil >= 0
+        if x.tracestart > 0
             howmanytrc += 1       
         end
         if x.isovia == :ct && x.health != SUS 
@@ -331,6 +334,7 @@ function time_update()
     lat=0; pre=0; asymp=0; mild=0; miso=0; inf=0; infiso=0; hos=0; icu=0; rec=0; ded=0;
     for x in humans 
         x.tis += 1 
+        x.doi += 1 # increase day of infection. variable is garbage until person is latent
         if x.tis >= x.exp             
             @match Symbol(x.swap) begin
                 :LAT  => begin move_to_latent(x); lat += 1; end
@@ -387,16 +391,15 @@ end
 function move_to_latent(x::Human)
     ## transfers human h to the incubation period and samples the duration
     x.health = LAT
+    x.doi = 0 ## day of infection is reset when person becomes latent
     x.tis = 0   # reset time in state 
     x.exp = x.dur[1] # get the latent period
     x.swap = rand() < p.fasymp ? ASYMP : PRE 
-
     ## in calibration mode, latent people never become infectious.
     if p.calibration 
         x.swap = LAT 
         x.exp = 999
     end
-    x.icu = false # reset the icu so it dosn't pop up as a bug later.
 end
 export move_to_latent
 
@@ -581,41 +584,55 @@ function move_to_recovered(h::Human)
     # isolation property has no effect in contact dynamics anyways (unless x == SUS)
 end
 
- function ct_dynamics(x::Human)
+function ct_dynamics(x::Human)
     # main function for ct dynamics 
     # turns tracing on if person is infectious and in the right time window
     # applies isolation to all traced contacts
     # turns of isolation for susceptibles > 14 days
     # order of if statements matter here 
-    !(p.fctcapture > 0) && (return 0)
+    !(p.fctcapture > 0) && (return)
     xh = x.health 
     xs = x.swap
+    dur = x.dur
+    doi = x.doi
+    #fctcapture::Float16 = 0.0 ## how many of contacts of the infected are we tracing.     
+    #cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
+    #cdaysback::Int8 = 0 ## number of days to go back and collect contacts
+    # tracing::Bool = false ## are we tracing contacts for this individual?
+    # tracestart::Int8 = -1 ## when to start tracing, based on values sampled for x.dur
+    # traceend::Int8 = -1 ## when to end tracing
+    # tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
+    # tracedxp::UInt16 = 0 ## the trace is killed after tracedxp amount of days
 
-    # everyday remove a day
-    if x.tracing 
-        ## check if person is still infectious 
-        (xh == SUS || xh == LAT || xh == ASYMP || xh == REC || xh == DED) && error("can not trace this person")
-        x.tracinguntil -= 1
-        if x.tracinguntil == 0 ## agent identified, make all contacts isolate,including the agent
-            _set_isolation(x, true, :ct)
-            x.tracing = false
-            alltraced = findall(y -> y.tracedby == x.idx, humans)
-            for i in alltraced
-                y = humans[i]
-                if y.health in (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO)
+    ## person is newly infectious, calculate tracing numbers
+    if xh == LAT && xs != ASYMP && doi == 0 
+        if rand() < p.fctcapture 
+            delta = dur[1] + dur[3] + p.cidtime # the latent + presymp + time to identification time
+            q = delta - p.cdaysback  
+            #println("delta = $delta, q = $q")
+            x.tracestart = q 
+            x.traceend = delta
+            (x.tracestart > x.traceend) && error("tracestart < traceend")
+        end
+    end
+
+    ## turn on trace when day of infection == tracestart    
+    if doi == x.tracestart 
+        x.tracing = true 
+    end 
+    if doi == x.traceend 
+        ## have to do more work here
+        x.tracing = false 
+        _set_isolation(x, true, :ct)
+        alltraced = findall(y -> y.tracedby == x.idx, humans)
+        for i in alltraced
+            y = humans[i]
+            if y.health in (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO)
                 _set_isolation(y, true, :ct)
             end            
         end
     end
-    end
-
-    # when the person is a new PRE, check for whether we will trace 
-    if xh == PRE && xs != ASYMP && x.tis == 0 
-        if rand() < p.fctcapture
-            x.tracing = true
-            x.tracinguntil = p.maxtracedays + 1 ## trace for this many days. +1 because you cant trace in PRE which is one day
-        end
-    end
+    
 
     # a susceptible that was traced through infected is only isolated for 14 days. 
     if xh == SUS && x.iso == true && x.isovia == :ct 
@@ -624,6 +641,7 @@ end
             _set_isolation(x, false)
         end
     end
+    return
 end
 export ct_dynamics
 
@@ -681,26 +699,25 @@ function dyntrans(sys_time, grps)
                 if ycnt > 0 
                     tomeet[y.idx] = tomeet[y.idx] - 1 # remove a contact
                     # there is a contact to recieve
-                # tracing dynamics
+                     # tracing dynamics
                     
-                    # an infected person can meet ANYONE, but make sure you isolate the correct people
-                if x.tracing  
-                    if y.tracedby == 0 
-                        y.tracedby = x.idx
-                        y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
+                    if x.tracing  
+                        if y.tracedby == 0 && rand() < p.fcontactst
+                            y.tracedby = x.idx
+                            y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
+                        end
                     end
-                end
                     
                 # tranmission dynamics
                     if  y.health == SUS && y.swap == UNDEF                  
-                    beta = _get_betavalue(sys_time, xhealth)
-                    if rand() < beta
-                        totalinf += 1
-                        y.swap = LAT
-                        y.exp = y.tis   ## force the move to latent in the next time step.
-                        y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
-                    end  
-                end
+                        beta = _get_betavalue(sys_time, xhealth)
+                        if rand() < beta
+                            totalinf += 1
+                            y.swap = LAT
+                            y.exp = y.tis   ## force the move to latent in the next time step.
+                            y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
+                        end  
+                    end
 
                 end
                 
