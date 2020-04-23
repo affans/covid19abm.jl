@@ -50,16 +50,25 @@ end
         insert_infected(cv.INF, 1, ag) # 1 infected in age group ag
         @test length(findall(x -> x.health == cv.INF && x.ag == ag, cv.humans)) == 1
     end
+
     ## check if the initial infected person is NOT IISO 
     cv.p.fsevere = 0.0 
     initialize() # reset population
     insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
+
     ## check if the initial infected person is REC (since simpleinf function only puts them to REC)
     cv.p.fsevere = 1.0 
     initialize() # reset population
     insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
+
+    ## check if durations are properly set 
+    initialize() 
+    randhumans = rand(1:10000, 100) # select 100 random humans, no need to test all 10000
+    for i in randhumans
+        @test minimum(humans[i].dur) != 0
+    end
 end
 
 @testset "transitions" begin
@@ -98,30 +107,31 @@ end
         end    
     end
 
-    
     # CHECKING LATENT
     initialize()
     x = humans[1]
     x.ag = 1 ## move to the first age group manually.
     myp = cv.ModelParameters()   
-    myp.fpre = 0.0  ## turn off presymptomatic 
+
+    # check basic variables
     cv.reset_params(myp)
     move_to_latent(x)
-    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
+    @test x.swap ∈ (cv.ASYMP, cv.PRE)
     @test x.iso == false
+    @test x.doi == 0 
+    @test x.tis == 0 
+    @test x.exp == x.dur[1]
 
-    myp.fpre = 1.0  ## turn on presymptomatic 
+    # check split between asymp/pre
+    myp.fasymp = 0.0   
     cv.reset_params(myp)
     move_to_latent(x)
     @test x.swap == cv.PRE
-    @test x.iso == false # isolation should not be turned on in latent at all.
 
-    myp.fpre = 0.0  ## turn off presymptomatic but turn on asymp 
     myp.fasymp = 1.0
     cv.reset_params(myp)
     move_to_latent(x)
-    @test x.swap ∈ (cv.ASYMP, cv.INF)
-    @test x.iso == false
+    @test x.swap == cv.ASYMP
 
     # CHECKING PRE
     initialize()
@@ -129,14 +139,8 @@ end
     cv.reset_params(myp)
     move_to_pre(x) 
     @test x.health == cv.PRE 
-    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
+    @test x.swap ∈ (cv.MILD, cv.INF)
    
-    myp.fpreiso = 0.0
-    cv.reset_params(myp)
-    move_to_pre(x) 
-    @test x.health == cv.PRE 
-    @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF)
-    
     ## check if individual moves through mild, miso through fmild, tmild parameters
     initialize()
     x = humans[1]
@@ -248,75 +252,107 @@ end
 end
 
 @testset "contact trace" begin
-    myp = ModelParameters()
-    myp.β = 1.0 
-    cv.reset_params(myp)
-    cv.initialize()
-    hdx = rand(1:10000, 20) ## sample 20 humans instead of all 10000 
-    for i in hdx
-        x = cv.humans[i] 
-        cv.ct_dynamics(x)
-        @test x.tracing == false ## since fctcapture = 0.0
-        @test x.tracinguntil == -1
-        @test x.tracedby == 0 
-        @test x.tracedxp == 0
-    end
+    # todo: check interaction between doi and tracestart, default values
+    # myp = ModelParameters()
+    # myp.β = 1.0 
+    # cv.reset_params(myp)
+    # cv.initialize()
+    # hdx = rand(1:10000, 20) ## sample 20 humans instead of all 10000 
+    # for i in hdx
+    #     x = cv.humans[i] 
+    #     cv.ct_dynamics(x)
+    #     @test x.tracing == false ## since fctcapture = 0.0
+    #     @test x.tracinguntil == -1
+    #     @test x.tracedby == 0 
+    #     @test x.tracedxp == 0
+    # end
+    # ## test the contact_tracing() function 
+    # cv.initialize()    
+    # grps = cv.get_ag_dist()
+    # myp.fctcapture = 1.0 
+    # myp.fasymp = 0.0  # to force no asymp
+    # cv.reset_params(myp)
+    # cv.initialize()    
+    # tracer = cv.humans[1]
+    # cv.move_to_pre(tracer) # newly presymptomatic
+    # cv.ct_dynamics(tracer) # will turn on tracing
+    # @test tracer.tracing == true 
+    # @test tracer.tracinguntil == 3
 
-    ## test the contact_tracing() function 
-    cv.initialize()    
-    grps = cv.get_ag_dist()
-    myp.fctcapture = 1.0 
-    myp.fasymp = 0.0  # to force no asymp
-    cv.reset_params(myp)
-    cv.initialize()    
-    tracer = cv.humans[1]
-    cv.move_to_pre(tracer) # newly presymptomatic
-    cv.ct_dynamics(tracer) # will turn on tracing
-    @test tracer.tracing == true 
-    @test tracer.tracinguntil == 3
-
-    cv.dyntrans(1, grps) ## go through a single tranmission cycle
-    alltraced = findall(x -> x.tracedby > 0, cv.humans) ## since we havn't turned fctcapture > 0
-    @test length(alltraced) > 0
-    for i in alltraced
-        y = cv.humans[i]
-        @test y.tracedby == 1 ## since we used the first human as the tracing contact
-        @test y.tracedxp == 14
-        @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
-        @test y.isovia == :null 
-    end
-    ## time update calls the ctdynamics function.. have to use this because otherwise tracer is stuck on PRE day 1. 
-    cv.time_update() 
-    #cv.ct_dynamics(tracer) # will turn on tracing
-    @test tracer.tracing == true 
-    @test tracer.tracinguntil == 2 
-    for i in alltraced
-        y = cv.humans[i]
-        @test y.tracedby == 1 ## since we used the first human as the tracing contact
-        @test y.tracedxp == 14
-        @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
-        @test y.isovia == :null 
-    end
-    cv.time_update()
-    @test tracer.tracing == true 
-    @test tracer.tracinguntil == 1
-    for i in alltraced
-        y = cv.humans[i]
-        @test y.tracedby == 1 ## since we used the first human as the tracing contact
-        @test y.tracedxp == 14
-        @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
-        @test y.isovia == :null 
-    end
-    cv.time_update()
-    @test tracer.tracing == false  
-    @test tracer.tracinguntil == 0
+    # cv.dyntrans(1, grps) ## go through a single tranmission cycle
+    # alltraced = findall(x -> x.tracedby > 0, cv.humans) ## since we havn't turned fctcapture > 0
+    # @test length(alltraced) > 0
     # for i in alltraced
     #     y = cv.humans[i]
-    #     @test y.tracedby == 1 
-    #     @test y.tracedxp == 13 ## one less day from 14
-    #     @test y.iso == true ## the first human is not in INF stage yet.. still in presymp
-    #     @test y.isovia == :ct 
+    #     @test y.tracedby == 1 ## since we used the first human as the tracing contact
+    #     @test y.tracedxp == 14
+    #     @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
+    #     @test y.isovia == :null 
     # end
+    # ## time update calls the ctdynamics function.. have to use this because otherwise tracer is stuck on PRE day 1. 
+    # cv.time_update() 
+    # #cv.ct_dynamics(tracer) # will turn on tracing
+    # @test tracer.tracing == true 
+    # @test tracer.tracinguntil == 2 
+    # for i in alltraced
+    #     y = cv.humans[i]
+    #     @test y.tracedby == 1 ## since we used the first human as the tracing contact
+    #     @test y.tracedxp == 14
+    #     @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
+    #     @test y.isovia == :null 
+    # end
+    # cv.time_update()
+    # @test tracer.tracing == true 
+    # @test tracer.tracinguntil == 1
+    # for i in alltraced
+    #     y = cv.humans[i]
+    #     @test y.tracedby == 1 ## since we used the first human as the tracing contact
+    #     @test y.tracedxp == 14
+    #     @test y.iso == false ## the first human is not in INF stage yet.. still in presymp
+    #     @test y.isovia == :null 
+    # end
+    # cv.time_update()
+    # @test tracer.tracing == false  
+    # @test tracer.tracinguntil == 0
+    # # for i in alltraced
+    # #     y = cv.humans[i]
+    # #     @test y.tracedby == 1 
+    # #     @test y.tracedxp == 13 ## one less day from 14
+    # #     @test y.iso == true ## the first human is not in INF stage yet.. still in presymp
+    # #     @test y.isovia == :ct 
+    # # end
+    myp = cv.ModelParameters()    
+    myp.fctcapture = 1.0 # force contact tracing
+    myp.fasymp = 0.0 # force to pre
+    cv.reset_params(myp)
+    cv.initialize()
+    x = cv.humans[1] 
+    @test x.tracestart == -1 
+    @test x.traceend == -1
+
+    cv.move_to_latent(x)
+    cv.ct_dynamics(x) # since ct_dynamics will run when move_to_latent will run in time update func
+    @test x.swap == cv.PRE 
+    @test x.doi == 0 
+    @test x.tis == 0 
+    @test x.exp == x.dur[1]
+    @test x.tracestart > 0
+    @test x.traceend > 0 
+    
+    # go through entire inf period 
+    totalinfperiod = x.dur[1] + x.dur[3] + x.dur[4]
+    totaltracedays = 0
+    for i = 1:totalinfperiod
+        # dyntrans
+        cv.time_update()
+        @test x.doi == i # should increase with the counter.
+        if x.doi >= x.tracestart && x.doi < x.traceend
+            @test x.tracing == true 
+            totaltracedays += 1
+            println("trace true in health: $(x.HEALTH), tis: $(x.tis)")
+        end
+    end
+    @test totaltracedays == cv.p.cdaysback
 end
 
 @testset "main run" begin 
@@ -344,6 +380,36 @@ end
     println("time with contact tracing on:")
     @time results = cv.main(myp)
     
+#     function string_or_char(s::SubString)
+#         length(s) == 1 && return first(s)
+#         return String(s)
+#     end
+#     arr = Union{Char,String}[]
+# for i in split_string
+#     push!(arr, string_or_char(i))
+# end
+
+    # function addday(n)
+    #     strtorep = "---" * "\u00B7"
+    #     str = ""
+    #     for i = 1:n 
+    #         str =str * strtorep 
+    #     end
+    #     str = str[1:end-1]
+    #     str = " " * str * " "
+    #     return str
+    # end
+    
+
+    # function printascii_epi(x) 
+    #     fs = "" 
+    #     fs = fs * "L" * addday(x.dur[1])
+     
+    #     fs = fs * "P" * addday(x.dur[3])
+    #     fs = fs * "S" * addday(x.dur[4])
+    #     return fs
+    # end
+   
 
 end
 
