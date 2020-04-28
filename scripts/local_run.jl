@@ -97,7 +97,7 @@ function compute_yearly_average(df)
     return ya
 end
 
-function savestr(p::ModelParameters, custominsert="/")
+function savestr(p::ModelParameters, custominsert="/", customstart="")
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
     taustr = replace(string(p.τmild), "." => "")
@@ -116,7 +116,8 @@ function savestr(p::ModelParameters, custominsert="/")
     cct = replace(string(p.fcontactst), "." => "")
     idt = replace(string(p.cidtime), "." => "") 
     tback = replace(string(p.cdaysback), "." => "")     
-    fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    #fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fldrname = "/data/covid19abm/simresults/$(custominsert)/$(customstart)$(prov)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 
