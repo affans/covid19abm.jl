@@ -23,11 +23,6 @@ Base.@kwdef mutable struct Human
     tracedxp::UInt16 = 0 ## the trace is killed after tracedxp amount of days
 end
 
-Base.@kwdef mutable struct tt
-    idx::Int64 = 0 
-    dur::NTuple{4, Int8} = (lat=0, exp=0, scp=0, asp=0)  
-end
-
 ## default system parameters
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0       
@@ -45,6 +40,7 @@ end
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
     frelasymp::Float64 = 0.11 ## relative transmission of asymptomatic
+    ctstrat::Int8 = 0 ## strategy 
     fctcapture::Float16 = 0.0 ## how many symptomatic people identified
     fcontactst::Float16 = 0.0 ## fraction of contacts being isolated/quarantined
     cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
@@ -627,12 +623,17 @@ function ct_dynamics(x::Human)
         alltraced = findall(y -> y.tracedby == x.idx, humans)
         for i in alltraced
             y = humans[i]
-            if y.health in (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO)
-                _set_isolation(y, true, :ct)
-            end            
+            if p.ctstrat == 1
+                if y.health in (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO)
+                    _set_isolation(y, true, :ct)
+                end            
+            elseif p.ctstrat == 2
+                if y.health in (PRE, ASYMP, MILD, MISO, INF, IISO)
+                    _set_isolation(y, true, :ct)
+                end            
+            end 
         end
     end
-    
 
     # a susceptible that was traced through infected is only isolated for 14 days. 
     if xh == SUS && x.iso == true && x.isovia == :ct 
