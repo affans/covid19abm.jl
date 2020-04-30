@@ -47,6 +47,16 @@ end
     cdaysback::Int8 = 0 ## number of days to go back and collect contacts
 end
 
+Base.@kwdef mutable struct ct_data_collect
+    total_symp_id::Int64 = 0  # total symptomatic identified
+    totaltrace::Int64 = 0     # total contacts traced
+    totalisolated::Int64 = 0  # total number of people isolated
+    iso_sus::Int64 = 0        # total susceptible isolated 
+    iso_lat::Int64 = 0        # total latent isolated
+    iso_asymp::Int64 = 0      # total asymp isolated
+    iso_symp::Int64 = 0       # total symp (mild, inf) isolated
+end
+
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
@@ -54,7 +64,7 @@ const HSIZE = 10000
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
-
+const ct_data = ct_data_collect()
 export ModelParameters, HEALTH, Human, humans
 
 function runsim(simnum, ip::ModelParameters)
@@ -63,8 +73,10 @@ function runsim(simnum, ip::ModelParameters)
     # get infectors counters
     infectors = _count_infectors()
 
-    ct_numbers = _count_ct_numbers()
-
+    #ct_numbers = _count_ct_numbers()
+    ct_numbers = (ct_data.total_symp_id, ct_data.totaltrace, ct_data.totalisolated, 
+                    ct_data.iso_sus, ct_data.iso_lat, ct_data.iso_asymp, ct_data.iso_symp)
+    
     # get simulation age groups
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
     all = _collectdf(hmatrix)
@@ -129,6 +141,11 @@ function reset_params(ip::ModelParameters)
     # copy the values from ip to p. 
     for x in propertynames(p)
         setfield!(p, x, getfield(ip, x))
+    end
+
+    # reset the contact tracing data collection structure
+    for x in propertynames(ct_data)
+        setfield!(ct_data, x, 0)
     end
 end
 export reset_params, reset_params_default
@@ -609,6 +626,7 @@ function ct_dynamics(x::Human)
             x.tracestart = q 
             x.traceend = delta
             (x.tracestart > x.traceend) && error("tracestart < traceend")
+            ct_data.total_symp_id += 1 ## update the data collection counter
         end
     end
 
@@ -623,15 +641,21 @@ function ct_dynamics(x::Human)
         alltraced = findall(y -> y.tracedby == x.idx, humans)
         for i in alltraced
             y = humans[i]
-            if p.ctstrat == 1
-                if y.health in (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO)
-                    _set_isolation(y, true, :ct)
-                end            
-            elseif p.ctstrat == 2
-                if y.health in (PRE, ASYMP, MILD, MISO, INF, IISO)
-                    _set_isolation(y, true, :ct)
-                end            
-            end 
+            yhealth = y.health
+            hconditions = p.ctstrat == 1 ? (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO) : (PRE, ASYMP, MILD, MISO, INF, IISO)
+            if yhealth in hconditions                
+                ct_data.totalisolated += 1                
+                _set_isolation(y, true, :ct)                    
+                if yhealth == SUS 
+                    ct_data.iso_sus += 1 
+                elseif yhealth == LAT 
+                    ct_data.iso_lat += 1
+                elseif yhealth == ASYMP 
+                    ct_data.iso_asymp += 1
+                else 
+                    ct_data.iso_symp += 1
+                end
+            end
         end
     end
 
@@ -681,7 +705,7 @@ function dyntrans(sys_time, grps)
         end
         tomeet[i] = cnt
     end
-    
+
     # go through every infectious person
     for xid in infs 
         x = humans[xid]
@@ -706,6 +730,7 @@ function dyntrans(sys_time, grps)
                         if y.tracedby == 0 && rand() < p.fcontactst
                             y.tracedby = x.idx
                             y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
+                            ct_data.totaltrace += 1 
                         end
                     end
                     
