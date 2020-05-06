@@ -73,7 +73,6 @@ function runsim(simnum, ip::ModelParameters)
     # get infectors counters
     infectors = _count_infectors()
 
-    #ct_numbers = _count_ct_numbers()
     ct_numbers = (ct_data.total_symp_id, ct_data.totaltrace, ct_data.totalisolated, 
                     ct_data.iso_sus, ct_data.iso_lat, ct_data.iso_asymp, ct_data.iso_symp)
     
@@ -247,28 +246,7 @@ function _count_infectors()
     return (pre_ctr, asymp_ctr, mild_ctr, inf_ctr)
 end
 
-function _count_ct_numbers() 
-    howmanytrc = 0 # how many traced (num / (inf + mild) ~ percentage)
-    howmanyisoct = 0 # how many isolated (of all sick people) (contact tracing)
-    howmanyisopi = 0 # how many isolated (of all sick people) (through presymp)
-    howmanyiso = 0
-    for x in humans 
-        if x.tracestart > 0
-            howmanytrc += 1       
-        end
-        if x.isovia == :ct && x.health != SUS 
-            howmanyisoct += 1
-        end
-        if x.isovia == :pi && x.health != SUS 
-            howmanyisopi += 1
-        end
-        if x.isovia != :null && x.health != SUS 
-            howmanyiso += 1 
-    end
-end
-    return howmanytrc, howmanyiso, howmanyisoct, howmanyisopi
-end
-export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors, _count_ct_numbers
+export _collectdf, _get_incidence_and_prev, _get_column_incidence, _get_column_prevalence, _count_infectors
 
 ## initialization functions 
 function get_province_ag(prov) 
@@ -603,7 +581,7 @@ function ct_dynamics(x::Human)
     # applies isolation to all traced contacts
     # turns of isolation for susceptibles > 14 days
     # order of if statements matter here 
-    !(p.fctcapture > 0) && (return)
+    (p.ctstrat == 0) && (return)
     xh = x.health 
     xs = x.swap
     dur = x.dur
@@ -620,10 +598,11 @@ function ct_dynamics(x::Human)
     ## person is newly infectious, calculate tracing numbers
     if xh == LAT && xs != ASYMP && doi == 0 
         if rand() < p.fctcapture 
-            delta = dur[1] + dur[3] + p.cidtime # the latent + presymp + time to identification time
+            #delta = dur[1] + dur[3] + p.cidtime # the latent + presymp + time to identification time
+            delta = dur[1] + dur[3] + Int(round(rand(Gamma(3.2, 1))))
             q = delta - p.cdaysback  
             #println("delta = $delta, q = $q")
-            x.tracestart = q 
+            x.tracestart = min(0, q) # minimum of zero since delta < p.cdaysback
             x.traceend = delta
             (x.tracestart > x.traceend) && error("tracestart < traceend")
             ct_data.total_symp_id += 1 ## update the data collection counter
@@ -664,6 +643,8 @@ function ct_dynamics(x::Human)
         x.tracedxp -= 1
         if x.tracedxp == 0 
             _set_isolation(x, false)
+            x.tracedby = 0 # the trace is killed
+            # x.tracedxp = 0  will already be zero.
         end
     end
     return
