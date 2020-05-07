@@ -30,6 +30,7 @@ end
     calibration::Bool = false 
     modeltime::Int64 = 500
     initialinf::Int64 = 1
+    initialhi::Int64 = 0 ## initial herd immunity, inserts number of REC individuals
     τmild::Int64 = 0 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.0  ## percent of people practice self-isolation
     fsevere::Float64 = 0.0 # fixed at 0.80
@@ -107,6 +108,7 @@ function main(ip::ModelParameters)
         insert_infected(PRE, p.initialinf, 4)
     else 
         insert_infected(LAT, p.initialinf, 4)  
+        insert_infected(REC, p.initialhi, 4)
     end    
     
     ## save the preisolation isolation parameters
@@ -310,6 +312,8 @@ function insert_infected(health, num, ag)
                 move_to_latent(x)
             elseif health == INF
                 move_to_infsimple(x)
+            elseif health == REC 
+                move_to_recovered(x)
             else 
                 error("can not insert human of health $(health)")
             end       
@@ -602,7 +606,7 @@ function ct_dynamics(x::Human)
             delta = dur[1] + dur[3] + Int(round(rand(Gamma(3.2, 1))))
             q = delta - p.cdaysback  
             #println("delta = $delta, q = $q")
-            x.tracestart = min(0, q) # minimum of zero since delta < p.cdaysback
+            x.tracestart = max(0, q) # minimum of zero since delta < p.cdaysback
             x.traceend = delta
             (x.tracestart > x.traceend) && error("tracestart < traceend")
             ct_data.total_symp_id += 1 ## update the data collection counter
