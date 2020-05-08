@@ -71,6 +71,18 @@ end
     for i in randhumans
         @test minimum(humans[i].dur) != 0
     end
+
+    ## check if beta values are time dependent or NOT
+    cv.p.seasonal = true 
+    cv.p.β = 1.0
+    svalues = cv.td_seasonality()
+    cv.init_betas()
+    @test sum(svalues) == sum(cv.BETAS)
+
+    cv.p.seasonal = false 
+    cv.p.β = 1.0
+    cv.init_betas()
+    @test cv.p.modeltime == sum(cv.BETAS)
 end
 
 @testset "transitions" begin
@@ -212,7 +224,7 @@ end
     @test totalinf == 0 # still zero cuz beta = 0
 
     # now change beta 
-    cv.reset_params(ModelParameters(β = 1.0))
+    cv.reset_params(ModelParameters(β = 1.0))    
     totalinf = cv.dyntrans(1, grps)  
     @test totalinf > 0 ## actually may still be zero because of stochasticity but very unliekly 
 

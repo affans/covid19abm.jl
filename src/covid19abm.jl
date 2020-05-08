@@ -26,6 +26,7 @@ end
 ## default system parameters
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0       
+    seasonal::Bool = false ## seasonal betas or not
     prov::Symbol = :ontario 
     calibration::Bool = false 
     modeltime::Int64 = 500
@@ -65,8 +66,9 @@ const HSIZE = 10000
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
+const BETAS = Array{Float64, 1}(undef, 0) ## to hold betas (whether fixed or seasonal), array will get resized
 const ct_data = ct_data_collect()
-export ModelParameters, HEALTH, Human, humans
+export ModelParameters, HEALTH, Human, humans, BETAS
 
 function runsim(simnum, ip::ModelParameters)
     # function runs the `main` function, and collects the data as dataframes. 
@@ -148,6 +150,9 @@ function reset_params(ip::ModelParameters)
     for x in propertynames(ct_data)
         setfield!(ct_data, x, 0)
     end
+
+    # resize and update the BETAS constant array
+    init_betas()
 end
 export reset_params, reset_params_default
 
@@ -291,6 +296,31 @@ function initialize()
     end
 end
 export initialize
+
+function init_betas() 
+    if p.seasonal  
+        tmp = p.β .* td_seasonality()
+    else 
+        tmp = p.β .* ones(Float64, p.modeltime)
+    end
+    resize!(BETAS, length(tmp))
+    for i = 1:length(tmp)
+        BETAS[i] = tmp[i]
+    end
+end
+
+function td_seasonality()
+    ## returns a vector of seasonal oscillations
+    t = 1:p.modeltime
+    a0 = 6.261
+    a1 = -11.81
+    b1 = 1.817
+    w = 0.022 #0.01815    
+    temp = @. a0 + a1*cos((80-t)*w) + b1*sin((80-t)*w)  #100
+    #temp = @. a0 + a1*cos((80-t+150)*w) + b1*sin((80-t+150)*w)  #100
+    temp = (temp .- 2.5*minimum(temp))./(maximum(temp) .- minimum(temp)); # normalize  @2
+    return temp
+end
 
 function get_ag_dist() 
     # splits the initialized human pop into its age groups
@@ -656,7 +686,9 @@ end
 export ct_dynamics
 
 @inline function _get_betavalue(sys_time, xhealth) 
-    bf = p.β ## baseline PRE
+    #bf = p.β ## baseline PRE
+    length(BETAS) == 0 && return 0
+    bf = BETAS[sys_time]
     # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
     if xhealth == ASYMP
         bf = bf * p.frelasymp
