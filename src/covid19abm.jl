@@ -562,7 +562,6 @@ function move_to_hospicu(x::Human)
     x.health = swaphealth ## swap either to HOS or ICU
     x.swap = UNDEF
     x.tis = 0
-    # hospital patients are isolated, but it's irrelevant because they don't have contacts and can't get sick again
     _set_isolation(x, true) # do not set the isovia property here.  
 
     if swaphealth == HOS 
@@ -607,6 +606,48 @@ function move_to_recovered(h::Human)
     h.iso = false ## a recovered person has ability to meet others
     _set_isolation(h, false)  # do not set the isovia property here.  
     # isolation property has no effect in contact dynamics anyways (unless x == SUS)
+end
+
+function apply_ct_strategy(y::Human)
+    iso = false  # to collect data at the end of the function
+    yhealth = y.health
+    if p.ctstrat == 1 
+        # in strategy 1, all traced individuals are isolated for 14 days. 
+        _set_isolation(y, true, :ct)
+        iso = true
+        y.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
+        ct_data.totalisolated += 1  ## update counter               
+    end
+    if p.ctstrat == 2 
+        if y.health in (PRE, ASYMP, MILD, MISO, INF, IISO)
+            _set_isolation(y, true, :ct)
+            iso = true
+            y.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
+            ct_data.totalisolated += 1  ## update counter
+        else
+            _set_isolation(y, false)
+            # kill the trace
+            y.tracedby = 0 
+            y.tracedxp = 0 
+        end
+    end
+    if p.ctstrat == 3
+         # in strategy 3, all traced individuals are isolated for only 4 days. 
+         _set_isolation(y, true, :ct)
+         iso = true
+         y.tracedxp = 4 ## trace isolation will last for 14 days before expiry                
+         ct_data.totalisolated += 1  ## update counter 
+    end
+    # count data
+    if yhealth == INF || yhealth == MILD 
+        ct_data.iso_symp += 1
+    elseif yhealth == LAT 
+        ct_data.iso_lat += 1
+    elseif yhealth == ASYMP 
+        ct_data.iso_asymp += 1
+    else        
+        ct_data.iso_sus += 1 
+    end
 end
 
 function ct_dynamics(x::Human)
@@ -655,30 +696,25 @@ function ct_dynamics(x::Human)
         for i in alltraced
             y = humans[i]
             yhealth = y.health
-            hconditions = p.ctstrat == 1 ? (SUS, LAT, PRE, ASYMP, MILD, MISO, INF, IISO) : (PRE, ASYMP, MILD, MISO, INF, IISO)
-            if yhealth in hconditions                
-                ct_data.totalisolated += 1                
-                _set_isolation(y, true, :ct)                    
-                if yhealth == SUS 
-                    ct_data.iso_sus += 1 
-                elseif yhealth == LAT 
-                    ct_data.iso_lat += 1
-                elseif yhealth == ASYMP 
-                    ct_data.iso_asymp += 1
-                else 
-                    ct_data.iso_symp += 1
-                end
-            end
+            apply_ct_strategy(y)
         end
     end
 
-    # a susceptible that was traced through infected is only isolated for 14 days. 
-    if xh == SUS && x.iso == true && x.isovia == :ct 
+    if x.tracedxp > 0  # person was traced, isolated, and will be for x days
         x.tracedxp -= 1
         if x.tracedxp == 0 
-            _set_isolation(x, false)
-            x.tracedby = 0 # the trace is killed
-            # x.tracedxp = 0  will already be zero.
+            # check whether isolation is turned on/off based on ctstrat
+            if p.ctstrat == 3 && x.health in (PRE, ASYMP, MILD, INF, MISO, IISO)
+                # if strategy 3, only those that are tested positive are furthered isolated for 14 days.
+                _set_isolation(x, true) ## isovia should already be set to :ct 
+                x.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
+                ct_data.totalisolated += 1  ## update counter 
+            else
+                # else their trace is killed
+                _set_isolation(x, false)
+                x.isovia = :null # not isolated via contact tracing anymore
+                x.tracedby = 0 # the trace is killed
+            end            
         end
     end
     return
@@ -720,6 +756,9 @@ function dyntrans(sys_time, grps)
         else 
             cnt = rand(nbs[ag])  # expensive operation, try to optimize
         end
+        if x.health == DED 
+            cnt = 0 
+        end
         tomeet[i] = cnt
     end
 
@@ -746,7 +785,6 @@ function dyntrans(sys_time, grps)
                     if x.tracing  
                         if y.tracedby == 0 && rand() < p.fcontactst
                             y.tracedby = x.idx
-                            y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
                             ct_data.totaltrace += 1 
                         end
                     end
