@@ -8,19 +8,20 @@ Base.@kwdef mutable struct Human
     health::HEALTH = SUS
     swap::HEALTH = UNDEF
     sickfrom::HEALTH = UNDEF
-    age::Int64   = 0    # in years. don't really need this but left it incase needed later
-    ag::Int64    = 0
-    tis::Int64   = 0   # time in state 
-    exp::Int64   = 0   # max statetime
+    nextday_meetcnt::Int16 = 0 ## how many contacts for a single day
+    age::Int16   = 0    # in years. don't really need this but left it incase needed later
+    ag::Int16   = 0
+    tis::Int16   = 0   # time in state 
+    exp::Int16   = 0   # max statetime
     dur::NTuple{4, Int8} = (0, 0, 0, 0)   # Order: (latents, asymps, pres, infs) TURN TO NAMED TUPS LATER
-    doi::Int32   = 999   # day of infection.
+    doi::Int16   = 999   # day of infection.
     iso::Bool = false  ## isolated (limited contacts)
     isovia::Symbol = :null ## isolated via quarantine (:qu), preiso (:pi), intervention measure (:im), or contact tracing (:ct)    
     tracing::Bool = false ## are we tracing contacts for this individual?
-    tracestart::Int8 = -1 ## when to start tracing, based on values sampled for x.dur
-    traceend::Int8 = -1 ## when to end tracing
-    tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
-    tracedxp::UInt16 = 0 ## the trace is killed after tracedxp amount of days
+    tracestart::Int16 = -1 ## when to start tracing, based on values sampled for x.dur
+    traceend::Int16 = -1 ## when to end tracing
+    tracedby::UInt32 = 0 ## is the individual traced? property represents the index of the infectious person 
+    tracedxp::Int16 = 0 ## the trace is killed after tracedxp amount of days
 end
 
 ## default system parameters
@@ -104,7 +105,7 @@ function main(ip::ModelParameters)
 
     p.popsize == 0 && error("no population size given")
     
-    hmatrix = zeros(Int64, p.popsize, p.modeltime)
+    hmatrix = zeros(Int16, p.popsize, p.modeltime)
     initialize() # initialize population
     # insert initial infected agents into the model
     # and setup the right swap function. 
@@ -129,9 +130,7 @@ function main(ip::ModelParameters)
             p.fpreiso = _fpreiso
         end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        #dyntrans(st) 
         dyntrans(st, grps)
-        #dyntrans_nosus(st)
         sw = time_update()
         # end of day
     end
@@ -298,6 +297,8 @@ function initialize()
             x.iso = true   
             x.isovia = :qu         
         end
+        # initialize the next day counts (this is important in initialization since dyntrans runs first)
+        get_nextday_counts(x)
     end
 end
 export initialize
@@ -383,6 +384,9 @@ function time_update()
         end
         # run covid-19 functions for other integrated dynamics. 
         ct_dynamics(x)
+
+        # get the meet counts for the next day 
+        get_nextday_counts(x)
     end
     return (lat, mild, miso, inf, infiso, hos, icu, rec, ded)
 end
@@ -745,75 +749,76 @@ export ct_dynamics
 end
 export _get_betavalue
 
+@inline function get_nextday_counts(x::Human)
+    # get all people to meet and their daily contacts to recieve
+    # we can sample this at the start of the simulation to avoid everyday    
+    cnt = 0
+    ag = x.ag
+    #if person is isolated, they can recieve only 3 maximum contacts
+    if x.iso 
+        cnt = rand() < 0.5 ? 0 : rand(1:3)
+    else 
+        cnt = rand(nbs[ag])  # expensive operation, try to optimize
+    end
+    if x.health == DED 
+        cnt = 0 
+    end
+    x.nextday_meetcnt = cnt
+    return cnt
+end
+
 function dyntrans(sys_time, grps)
+    totalmet = 0 # count the total number of contacts (total for day, for all INF contacts)
     totalinf = 0 # count number of new infected 
     ## find all the people infectious
     infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
     
-    # get all people to meet and their daily contacts to recieve
-    # we can sample this at the start of the simulation to avoid everyday
-    tomeet = Array{Int64, 1}(undef, p.popsize)    
-    for i in 1:p.popsize 
-        x = humans[i]
-        idx = x.idx 
-        ag = x.ag
-        cnt = 0
-        #if person is isolated, they can recieve only 3 maximum contacts
-        if x.iso 
-            cnt = rand() < 0.5 ? 0 : rand(1:3)
-        else 
-            cnt = rand(nbs[ag])  # expensive operation, try to optimize
-        end
-        if x.health == DED 
-            cnt = 0 
-        end
-        tomeet[i] = cnt
-    end
-
     # go through every infectious person
     for xid in infs 
         x = humans[xid]
         xhealth = x.health
-        cnts = tomeet[xid]
-        # split the counts over age groups
-        gpw = Int.(round.(cm[x.ag]*cnts)) 
-        for (i, g) in enumerate(gpw)
-            # sample the people from each group
-            meet = rand(grps[i], g)
-            # go through each person
-            for j in meet 
-                y = humans[j]
-                ycnt = tomeet[y.idx]                
-                
-                if ycnt > 0 
-                    tomeet[y.idx] = tomeet[y.idx] - 1 # remove a contact
-                    # there is a contact to recieve
-                     # tracing dynamics
+        cnts = x.nextday_meetcnt
+        if cnts > 0  
+            gpw = Int.(round.(cm[x.ag]*cnts)) # split the counts over age groups
+            for (i, g) in enumerate(gpw)
+                # sample the people from each group
+                meet = rand(grps[i], g)
+                # go through each person
+                for j in meet 
+                    y = humans[j]
+                    ycnt = y.nextday_meetcnt             
                     
-                    if x.tracing  
-                        if y.tracedby == 0 && rand() < p.fcontactst
-                            y.tracedby = x.idx
-                            ct_data.totaltrace += 1 
+                    if ycnt > 0 
+                        y.nextday_meetcnt = y.nextday_meetcnt - 1 # remove a contact
+                        totalmet += 1
+                        # there is a contact to recieve
+                         # tracing dynamics
+                        
+                        if x.tracing  
+                            if y.tracedby == 0 && rand() < p.fcontactst
+                                y.tracedby = x.idx
+                                ct_data.totaltrace += 1 
+                            end
                         end
+                        
+                    # tranmission dynamics
+                        if  y.health == SUS && y.swap == UNDEF                  
+                            beta = _get_betavalue(sys_time, xhealth)
+                            if rand() < beta
+                                totalinf += 1
+                                y.swap = LAT
+                                y.exp = y.tis   ## force the move to latent in the next time step.
+                                y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
+                            end  
+                        end
+    
                     end
                     
-                # tranmission dynamics
-                    if  y.health == SUS && y.swap == UNDEF                  
-                        beta = _get_betavalue(sys_time, xhealth)
-                        if rand() < beta
-                            totalinf += 1
-                            y.swap = LAT
-                            y.exp = y.tis   ## force the move to latent in the next time step.
-                            y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
-                        end  
-                    end
-
                 end
-                
             end
-        end
+        end        
     end
-    return totalinf
+    return totalmet, totalinf
 end
 export dyntrans
 

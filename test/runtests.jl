@@ -45,19 +45,15 @@ end
         @test x.health == cv.SUS
         @test x.swap == cv.UNDEF
         @test x.sickfrom == cv.UNDEF
+        @test x.nextday_meetcnt >= 0 
         @test x.tis == 0 
         @test x.exp == 999
         
         @test x.iso == false
         @test x.isovia == :null
-        @test x.tis == 0
-        @test x.exp == 999
-        @test x.sickfrom == cv.UNDEF
 
         @test minimum(x.dur) != 0 #check if durations are properly set 
         @test x.doi == 999 
-        @test x.iso == false 
-        @test x.isovia == :null
         @test x.tracing == false
         @test x.tracestart == -1 
         @test x.traceend == -1 
@@ -209,6 +205,18 @@ end
         @test x.iso == true && x.isovia == :pi
     end
     # testing contact tracing isolation below
+
+    cv.initialize()
+    x = cv.humans[1]
+    x.iso = true
+    for i = 1:100 # stress test the function 
+        @test cv.get_nextday_counts(x) <= 3
+    end
+
+    x.health = cv.DED
+    for i = 1:100 # stress test the function 
+        @test cv.get_nextday_counts(x) == 0
+    end
 end
 
 
@@ -217,19 +225,29 @@ end
     cv.initialize()
     grps = cv.get_ag_dist()
     
-    # since beta = 0 default, and everyone sus
-    totalinf = cv.dyntrans(1, grps)  
-    @test totalinf == 0
+    # get an array of everyones meet counts 
+    ev_meet_cnts = [x.nextday_meetcnt for x in cv.humans]
 
-    # check with only a single infected person 
+    # since beta = 0 default, and everyone sus so no inf to loop over
+    tm, ti = cv.dyntrans(1, grps)  
+    @test ti == 0
+    @test tm == 0
+
+    # insert some infectious
     cv.insert_infected(cv.PRE, 1, 1) # 1 infected in age group ag
-    totalinf = cv.dyntrans(1, grps)  
-    @test totalinf == 0 # still zero cuz beta = 0
+    tm, ti = cv.dyntrans(1, grps) 
+    @test ti == 0 # still zero cuz beta = 0
+    @test tm > 0 # count still actually be zero but very unlikely. 
+    updated_ev_meet_cnts = [x.nextday_meetcnt for x in cv.humans]
+    lc_by_one = [x.nextday_meetcnt for x in cv.humans]
+    @test tm == sum(ev_meet_cnts - lc_by_one) # test algo. ev_meet_cnts is the original counts. lc_by_one should be counts -1 (except that single infectious person could meet the same person twice)
+    # but now some contacts should be -1 
+
 
     # now change beta 
     cv.reset_params(cv.ModelParameters(β = 1.0)) # to account for relative transmission    
-    totalinf = cv.dyntrans(1, grps)  
-    @test totalinf > 0 ## actually may still be zero because of stochasticity but very unliekly 
+    tm, ti = cv.dyntrans(1, grps)  
+    @test ti > 0 ## actually may still be zero because of stochasticity but very unliekly 
 
     cv.reset_params(cv.ModelParameters(β = 1.0, seasonal = false, frelasymp=0.11))   
     @test cv._get_betavalue(1, cv.ASYMP) == 1.0*0.11
