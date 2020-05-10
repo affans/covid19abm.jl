@@ -17,7 +17,7 @@ const cv=covid19abm
 #addprocs(30, exeflags="--project=.")
 #@everywhere using covid19abm
 
-addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.")
+addprocs(SlurmManager(500), N=17, topology=:master_worker, exeflags="--project=.")
 @everywhere using covid19abm
 
 function run(myp::ModelParameters, nsims=500, folderprefix="./")
@@ -133,20 +133,14 @@ function _calibrate(nsims, myp::ModelParameters)
     return mean(cdr), std(cdr)
 end
 
-function calibrate(beta, nsims, prov=:ontario)
-    myp = ModelParameters()
+function calibrate(beta, nsims, init_inf, size, prov=:ontario)
+    myp = ModelParameters() # set up default parameters 
     myp.β = beta
     myp.prov = prov
-    myp.modeltime = 50
-    myp.fmild = 0.0 
-    myp.τmild = 0
-    myp.eldq = 0.0
-    myp.fsevere = 0.0    
-    myp.fpreiso = 0.0 
-    myp.tpreiso = 0
-    myp.frelasymp = 0.11 ## relative transmission of asymptomatic
+    myp.popsize = size
+    myp.modeltime = 30
     myp.calibration = true
-    myp.initialinf = 1
+    myp.initialinf = init_inf
     m, sd = _calibrate(nsims, myp)
     println("mean R0: $(m) with std: $(sd)")
     myp.calibration = false       
