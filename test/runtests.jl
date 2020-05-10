@@ -17,7 +17,8 @@ const infectiousstates = (cv.LAT, cv.MILD, cv.MISO, cv.INF, cv.IISO, cv.HOS, cv.
     ip.eldq = 0.0 ## percentage quarantine of 60+ individuals, removes from chain of transmission
     ip.calibration = false 
     ip.modeltime = 500    
-    reset_params(ip)
+    ip.popsize = 20000
+    cv.reset_params(ip)
     for x in propertynames(cv.p)
         @test getfield(ip, x) == getfield(mod_ip, x)
     end
@@ -25,52 +26,58 @@ end
 
 @testset "init" begin
     cv.reset_params_default()
-    initialize()
+    cv.initialize()
+
+    # test if human array is resized to the correct length
+    @test length(cv.humans) == cv.p.popsize
 
     ## age groups
     inmodel = (1, 2, 3, 4, 5) ## possible age groups in model
     ags = []  
     for x in cv.humans
         push!(ags, x.ag)
-        @test x.ag in inmodel
-        @test x.exp == 999
+    end
+    @test length(unique(ags)) == length(inmodel) # check if all age groups are sampled
+
+    ## initial human states (check only subset of humans)
+    for i in rand(1:100, 100)
+        x = cv.humans[i]
         @test x.health == cv.SUS
         @test x.swap == cv.UNDEF
+        @test x.sickfrom == cv.UNDEF
+        @test x.tis == 0 
+        @test x.exp == 999
+        
         @test x.iso == false
         @test x.isovia == :null
         @test x.tis == 0
         @test x.exp == 999
         @test x.sickfrom == cv.UNDEF
+
+        @test minimum(x.dur) != 0 #check if durations are properly set 
+        @test x.doi == 999 
+        @test x.iso == false 
+        @test x.isovia == :null
+        @test x.tracing == false
+        @test x.tracestart == -1 
+        @test x.traceend == -1 
+        @test x.tracedby == x.tracedxp == 0 
     end
-    @test length(unique(ags)) == length(inmodel) # check if all age groups are sampled
-    
+   
     ## insert_infected check if infected person is added in the correct age group
     for ag in inmodel 
-        initialize() # reset population
-        insert_infected(cv.INF, 1, ag) # 1 infected in age group ag
+        cv.initialize() # reset population
+        cv.insert_infected(cv.INF, 1, ag) # 1 infected in age group ag
         @test length(findall(x -> x.health == cv.INF && x.ag == ag, cv.humans)) == 1
-        insert_infected(cv.REC, 1, ag) # 1 infected in age group ag
+        cv.insert_infected(cv.REC, 1, ag) # 1 infected in age group ag
         @test length(findall(x -> x.health == cv.REC && x.ag == ag, cv.humans)) == 1
     end
 
     ## check if the initial infected person is NOT IISO 
-    cv.p.fsevere = 0.0 
-    initialize() # reset population
-    insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
-    @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
-
-    ## check if the initial infected person is REC (since simpleinf function only puts them to REC)
     cv.p.fsevere = 1.0 
-    initialize() # reset population
-    insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
+    cv.initialize() # reset population
+    cv.insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
     @test length(findall(x -> x.health == cv.INF && x.swap == cv.REC, cv.humans)) == 1
-
-    ## check if durations are properly set 
-    initialize() 
-    randhumans = rand(1:10000, 100) # select 100 random humans, no need to test all 10000
-    for i in randhumans
-        @test minimum(humans[i].dur) != 0
-    end
 
     ## check if beta values are time dependent or NOT
     cv.p.seasonal = true 
@@ -87,11 +94,12 @@ end
 
 @testset "transitions" begin
     cv.reset_params_default()
-    initialize()
+    cv.initialize()
     
     ## check if time in state is up by one
     cv.time_update()
-    for x in cv.humans 
+    for i in rand(1:100, 100)
+        x = cv.humans[i]
         @test x.tis == 1  
         @test x.exp == 999
         @test x.health == cv.SUS
@@ -99,21 +107,24 @@ end
     end
 
     for x in cv.humans 
-        x.exp = 0 ## this will trigger a swap
+        x.exp = 0 ## this will trigger a swap, but no swap is set
     end
     @test_throws ErrorException("swap expired, but no swap set.") cv.time_update()
 
     #check if it goes through all the move compartments and see if health/swap changes
     
     for h in 2:9  ## latent to ded, ignore susceptible
-        initialize()
+        cv.initialize()
         rh = cv.HEALTH(h)
-        for x in humans 
+        randhumans = rand(1:100, 100)
+        for i in randhumans 
+            x = cv.humans[i]
             x.swap = rh
             x.exp = 0 ## to force the swap
         end
-        time_update() ## since tis > exp 
-        for x in humans[1:5]
+        cv.time_update() ## since tis > exp 
+        for i in randhumans 
+            x = cv.humans[i]
             @test x.health == rh
             if rh ∈ infectiousstates  ## for all states, except rec/ded there should be a swap
                 @test x.swap != cv.UNDEF
@@ -121,15 +132,14 @@ end
         end    
     end
 
-    # CHECKING LATENT
-    initialize()
-    x = humans[1]
+    # check latent function
+    cv.initialize()
+    x = cv.humans[1]
     x.ag = 1 ## move to the first age group manually.
     myp = cv.ModelParameters()   
-
-    # check basic variables
     cv.reset_params(myp)
-    move_to_latent(x)
+    # check basic variables    
+    cv.move_to_latent(x)
     @test x.swap ∈ (cv.ASYMP, cv.PRE)
     @test x.iso == false
     @test x.doi == 0 
@@ -139,44 +149,44 @@ end
     # check split between asymp/pre
     myp.fasymp = 0.0   
     cv.reset_params(myp)
-    move_to_latent(x)
+    cv.move_to_latent(x)
     @test x.swap == cv.PRE
 
     myp.fasymp = 1.0
     cv.reset_params(myp)
-    move_to_latent(x)
+    cv.move_to_latent(x)
     @test x.swap == cv.ASYMP
 
     # CHECKING PRE
-    initialize()
-    x = humans[1]
+    cv.initialize()
+    x = cv.humans[1]
     cv.reset_params(myp)
-    move_to_pre(x) 
+    cv.move_to_pre(x) 
     @test x.health == cv.PRE 
     @test x.swap ∈ (cv.MILD, cv.INF)
    
     ## check if individual moves through mild, miso through fmild, tmild parameters
-    initialize()
-    x = humans[1]
+    cv.initialize()
+    x = cv.humans[1]
     x.ag = 1 ## move to the first age group manually.
     x.iso = false ## turn this off so we can test the effect of fmild, tmild
     myp.fmild = 0.0
     cv.reset_params(myp)
-    move_to_mild(x)
+    cv.move_to_mild(x)
     @test x.swap == cv.REC
 
     myp.fmild = 1.0
     myp.τmild = 1
     cv.reset_params(myp)
-    move_to_mild(x)
+    cv.move_to_mild(x)
     @test x.swap == cv.MISO
     @test x.exp == 1
     
-    time_update() 
+    cv.time_update() 
     @test x.health == cv.MISO
     @test x.swap == cv.REC
     
-    ## todo: check if x.iso and x.isovia property are set correctly. 
+    # check if x.iso and x.isovia property are set correctly. 
     # 1) check if they are isolated through quarantine
     myp = cv.ModelParameters()   
     myp.eldq = 1.0  ## turn on eldq
@@ -206,6 +216,7 @@ end
         cv.move_to_pre(x)
         @test x.iso == true && x.isovia == :pi
     end
+    # testing contact tracing isolation below
 end
 
 
@@ -219,21 +230,28 @@ end
     @test totalinf == 0
 
     # check with only a single infected person 
-    insert_infected(cv.INF, 1, 1) # 1 infected in age group ag
+    cv.insert_infected(cv.PRE, 1, 1) # 1 infected in age group ag
     totalinf = cv.dyntrans(1, grps)  
     @test totalinf == 0 # still zero cuz beta = 0
 
     # now change beta 
-    cv.reset_params(ModelParameters(β = 1.0))    
+    cv.reset_params(cv.ModelParameters(β = 1.0)) # to account for relative transmission    
     totalinf = cv.dyntrans(1, grps)  
     @test totalinf > 0 ## actually may still be zero because of stochasticity but very unliekly 
 
-    ## somehow check the transmission reduction and number of contacts
+    cv.reset_params(cv.ModelParameters(β = 1.0, seasonal = false, frelasymp=0.11))   
+    @test cv._get_betavalue(1, cv.ASYMP) == 1.0*0.11
+
+    cv.reset_params(cv.ModelParameters(β = 1.0, seasonal = false, frelasymp=0.11))   
+    @test cv._get_betavalue(1, cv.MILD) == 1.0*0.44
+
+    cv.reset_params(cv.ModelParameters(β = 1.0, seasonal = false, frelasymp=0.11))   
+    @test cv._get_betavalue(1, cv.INF) == 1.0*0.89
 end
 
 @testset "calibration" begin
     # to do, run the model and test total number of infections 
-    myp = ModelParameters()
+    myp = cv.ModelParameters()
     myp.β = 1.0
     myp.prov = :ontario
     myp.calibration = true
@@ -248,7 +266,7 @@ end
     cv.insert_infected(cv.PRE, 1, 4)
     # find the single insert_presymptomatic person
     h = findall(x -> x.health == cv.PRE, cv.humans)
-    x = humans[h[1]]
+    x = cv.humans[h[1]]
     @test length(h) == 1
     @test x.ag == 4
     @test x.swap ∈ (cv.ASYMP, cv.MILD, cv.INF) ## always true for calibration 

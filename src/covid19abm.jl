@@ -27,6 +27,7 @@ end
 @with_kw mutable struct ModelParameters @deftype Float64    ## use @with_kw from Parameters
     β = 0.0       
     seasonal::Bool = false ## seasonal betas or not
+    popsize::Int64 = 10000
     prov::Symbol = :ontario 
     calibration::Bool = false 
     modeltime::Int64 = 500
@@ -62,8 +63,7 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 10000
-const humans = Array{Human}(undef, HSIZE) # run 100,000
+const humans = Array{Human}(undef, 0) 
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
 const BETAS = Array{Float64, 1}(undef, 0) ## to hold betas (whether fixed or seasonal), array will get resized
@@ -102,7 +102,9 @@ function main(ip::ModelParameters)
     # reset the parameters for the simulation scenario
     reset_params(ip)
 
-    hmatrix = zeros(Int64, HSIZE, p.modeltime)
+    p.popsize == 0 && error("no population size given")
+    
+    hmatrix = zeros(Int64, p.popsize, p.modeltime)
     initialize() # initialize population
     # insert initial infected agents into the model
     # and setup the right swap function. 
@@ -153,6 +155,9 @@ function reset_params(ip::ModelParameters)
 
     # resize and update the BETAS constant array
     init_betas()
+
+    # resize the human array to change population size
+    resize!(humans, p.popsize)
 end
 export reset_params, reset_params_default
 
@@ -281,7 +286,7 @@ export get_province_ag
 
 function initialize() 
     agedist = get_province_ag(p.prov)
-    @inbounds for i = 1:HSIZE 
+    for i = 1:p.popsize 
         humans[i] = Human()              ## create an empty human       
         x = humans[i]
         x.idx = i 
@@ -744,8 +749,8 @@ function dyntrans(sys_time, grps)
     
     # get all people to meet and their daily contacts to recieve
     # we can sample this at the start of the simulation to avoid everyday
-    tomeet = Array{Int64, 1}(undef, HSIZE)    
-    for i in 1:HSIZE 
+    tomeet = Array{Int64, 1}(undef, p.popsize)    
+    for i in 1:p.popsize 
         x = humans[i]
         idx = x.idx 
         ag = x.ag
