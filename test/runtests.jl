@@ -147,15 +147,7 @@ end
     @test x.exp == x.dur[1]
 
     # check split between asymp/pre
-    myp.fasymp = 0.0   
-    cv.reset_params(myp)
-    cv.move_to_latent(x)
-    @test x.swap == cv.PRE
-
-    myp.fasymp = 1.0
-    cv.reset_params(myp)
-    cv.move_to_latent(x)
-    @test x.swap == cv.ASYMP
+    # split to asymptomatic is now fixed in the model... not a parameter, see old commit for test code
 
     # CHECKING PRE
     cv.initialize()
@@ -258,7 +250,6 @@ end
     myp.fmild = 0.0 
     myp.fsevere = 0.0
     myp.fpreiso = 0.0
-    myp.fasymp = 0.5
     myp.initialinf = 1
     cv.reset_params(myp)
     cv.initialize()
@@ -286,7 +277,7 @@ end
 @testset "contact trace" begin
     myp = cv.ModelParameters()    
     myp.fctcapture = 1.0 # force contact tracing
-    myp.fasymp = 0.0 # force to pre
+    
     myp.ctstrat = 1  # turn on contact tracing
     cv.reset_params(myp)
     cv.initialize()
@@ -295,6 +286,7 @@ end
     @test x.traceend == -1
 
     cv.move_to_latent(x)
+    x.swap = cv.PRE # force to PRE
     cv.ct_dynamics(x) # since ct_dynamics will run when move_to_latent will run in time update func
     @test x.swap == cv.PRE 
     @test x.doi == 0 
@@ -325,12 +317,11 @@ end
     myp.β = 0.0525 
     myp.prov = :newyork    
     ## run empty scenario
-    ## this wont return calibrated scenario since fasymp = 0
+    
     myp.τmild = 0
     myp.fmild = 0.0
     myp.fsevere = 0.0
     myp.eldq = 0.0  
-    myp.fasymp = 0.5
     myp.fpre = 1.0
     myp.fpreiso = 0.0 
     myp.tpreiso = 0

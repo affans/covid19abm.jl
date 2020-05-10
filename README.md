@@ -39,7 +39,6 @@ The model is run by 1) instantiating a `ModelParameters` object with the desired
         fsevere: Float64 0.0       # fraction of severe individuals to be isolated
         eldq: Float64 0.0          # fraction of population isolated at start of simulation
         eldqag: Int8 5             # the age group isolated at start of simulation (in combination with eldq)
-        fasymp: Float64 0.5        # proportion of infected individuals that will be asymptomatic
         fpre: Float64 1.0          # (not used)
         fpreiso: Float64 0.0       # proportion of presymptomatics that are isolated 
         tpreiso: Int64 0           # time at which presymptomatic isolation is turned on

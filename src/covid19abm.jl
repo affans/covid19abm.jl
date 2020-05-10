@@ -38,7 +38,7 @@ end
     fsevere::Float64 = 0.0 # fixed at 0.80
     eldq::Float64 = 0.0 ## complete isolation of elderly
     eldqag::Int8 = 5 ## default age group, if quarantined(isolated) is ag 5. 
-    fasymp::Float64 = 0.50 ## percent going to asymp
+    fasymp::Float64 = 0.50 ## NOT USED ANYMORE ## percent going to asymp (may 10, removed all tests and references)
     fpre::Float64 = 1.0 ## NOT USED ANYMORE (percent going to presymptomatic)
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
@@ -424,7 +424,10 @@ function move_to_latent(x::Human)
     x.doi = 0 ## day of infection is reset when person becomes latent
     x.tis = 0   # reset time in state 
     x.exp = x.dur[1] # get the latent period
-    x.swap = rand() < p.fasymp ? ASYMP : PRE 
+    # the swap to asymptomatic is based on age group.
+    # ask seyed for the references
+    asymp_pcts = (0.25, 0.25, 0.14, 0.07, 0.07)    
+    x.swap = rand() < asymp_pcts[x.ag] ? ASYMP : PRE 
     ## in calibration mode, latent people never become infectious.
     if p.calibration 
         x.swap = LAT 

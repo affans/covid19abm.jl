@@ -106,7 +106,6 @@ function savestr(p::ModelParameters, custominsert="/", customstart="")
     prov = replace(string(p.prov), "." => "")
     eldr = replace(string(p.eldq), "." => "")
     eldqag = replace(string(p.eldqag), "." => "")     
-    fasymp = replace(string(p.fasymp), "." => "")
     fpreiso = replace(string(p.fpreiso), "." => "")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fsev = replace(string(p.fsevere), "." => "")    
@@ -116,8 +115,7 @@ function savestr(p::ModelParameters, custominsert="/", customstart="")
     cct = replace(string(p.fcontactst), "." => "")
     idt = replace(string(p.cidtime), "." => "") 
     tback = replace(string(p.cdaysback), "." => "")     
-    #fldrname = "/data/covid19abm/simresults/$(custominsert)/b$(rstr)_$(prov)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
-    fldrname = "/data/covid19abm/simresults/$(custominsert)/$(customstart)_$(prov)_strat$(strat)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fldrname = "/data/covid19abm/simresults/$(custominsert)/$(customstart)_$(prov)_strat$(strat)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 
@@ -147,7 +145,6 @@ function calibrate(beta, nsims, prov=:ontario)
     myp.fpreiso = 0.0 
     myp.tpreiso = 0
     myp.frelasymp = 0.11 ## relative transmission of asymptomatic
-    myp.fasymp = 0.50
     myp.calibration = true
     myp.initialinf = 1
     m, sd = _calibrate(nsims, myp)
