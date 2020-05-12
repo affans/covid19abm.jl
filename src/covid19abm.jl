@@ -686,7 +686,7 @@ function ct_dynamics(x::Human)
     if xh == LAT && xs != ASYMP && doi == 0 
         if rand() < p.fctcapture 
             #delta = dur[1] + dur[3] + p.cidtime # the latent + presymp + time to identification time
-            delta = dur[1] + dur[3] + Int(round(rand(Gamma(3.2, 1))))
+            delta = dur[1] + dur[3] + Int(round(rand(Gamma(3.2, 1)))) #see chads email for reference
             q = delta - p.cdaysback  
             #println("delta = $delta, q = $q")
             x.tracestart = max(0, q) # minimum of zero since delta < p.cdaysback
@@ -716,11 +716,19 @@ function ct_dynamics(x::Human)
         x.tracedxp -= 1
         if x.tracedxp == 0 
             # check whether isolation is turned on/off based on ctstrat
-            if p.ctstrat == 3 && x.health in (PRE, ASYMP, MILD, INF, MISO, IISO)
-                # if strategy 3, only those that are tested positive are furthered isolated for 14 days.
-                _set_isolation(x, true) ## isovia should already be set to :ct 
-                x.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
-                ct_data.totalisolated += 1  ## update counter 
+            if p.ctstrat == 3 
+                rn = rand()
+                # ask seyed for refernece, jeff
+                if (x.health == LAT && rn < 0.05) || (x.health == PRE && rn < 0.95) || (x.health == ASYMP && rn < 0.70) || x.health in (MILD, INF, MISO, IISO)
+                    # if strategy 3, only those that are tested positive are furthered isolated for 14 days.
+                    _set_isolation(x, true) ## isovia should already be set to :ct 
+                    x.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
+                    ct_data.totalisolated += 1  ## update counter
+                else 
+                    _set_isolation(x, false) ## isovia should already be set to :ct 
+                    x.isovia = :null # not isolated via contact tracing anymore
+                    x.tracedby = 0 # the trace is killed
+                end
             else
                 # else their trace is killed
                 _set_isolation(x, false)
