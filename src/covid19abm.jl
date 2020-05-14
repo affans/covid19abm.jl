@@ -49,6 +49,7 @@ end
     fcontactst::Float16 = 0.0 ## fraction of contacts being isolated/quarantined
     cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
     cdaysback::Int8 = 0 ## number of days to go back and collect contacts
+    strat3qdays::Int8 = 0
 end
 
 Base.@kwdef mutable struct ct_data_collect
@@ -647,7 +648,7 @@ function apply_ct_strategy(y::Human)
          # in strategy 3, all traced individuals are isolated for only 4 days. 
          _set_isolation(y, true, :ct)
          iso = true
-         y.tracedxp = 4 ## trace isolation will last for 14 days before expiry                
+         y.tracedxp = p.strat3qdays ## trace isolation will last for 14 days before expiry                
          ct_data.totalisolated += 1  ## update counter 
     end
     # count data

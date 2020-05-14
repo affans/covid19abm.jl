@@ -48,8 +48,8 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
-    c1 = Symbol.((:LAT, :ASYMP, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
-    c2 = Symbol.((:LAT, :ASYMP, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
+    c1 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
+    c2 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
