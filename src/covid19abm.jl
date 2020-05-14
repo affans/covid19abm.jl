@@ -513,7 +513,7 @@ function move_to_inf(x::Human)
  
     # h = prob of hospital, c = prob of icu AFTER hospital    
     h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
-    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
+    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.20)), rand(Uniform(0.05, 0.15))) 
     mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]     # death rate for severe cases.
     
     if p.calibration
@@ -651,8 +651,10 @@ function apply_ct_strategy(y::Human)
          y.tracedxp = p.strat3qdays ## trace isolation will last for 14 days before expiry                
          ct_data.totalisolated += 1  ## update counter 
     end
-    # count data
-    if yhealth == INF || yhealth == MILD 
+    # count data at time of infection... 
+    # this is technical a bug... for example, a susceptible individual may be quarantined for 14 days 
+    # but because they still have contacts, they may become sick and the category of the count should change. 
+    if yhealth == INF || yhealth == MILD || yhealth == PRE
         ct_data.iso_symp += 1
     elseif yhealth == LAT 
         ct_data.iso_lat += 1
