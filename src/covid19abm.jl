@@ -39,8 +39,8 @@ end
     fsevere::Float64 = 0.0 # fixed at 0.80
     eldq::Float64 = 0.0 ## complete isolation of elderly
     eldqag::Int8 = 5 ## default age group, if quarantined(isolated) is ag 5. 
-    fasymp::Float64 = 0.50 ## NOT USED ANYMORE ## percent going to asymp (may 10, removed all tests and references)
-    fpre::Float64 = 1.0 ## NOT USED ANYMORE (percent going to presymptomatic)
+    fasymp::Float64 = 0.0 ## NOT USED ANYMORE ## percent going to asymp (may 10, removed all tests and references)
+    fpre::Float64 = 0.0 ## NOT USED ANYMORE (percent going to presymptomatic)
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
     frelasymp::Float64 = 0.11 ## relative transmission of asymptomatic
@@ -50,6 +50,9 @@ end
     cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
     cdaysback::Int8 = 0 ## number of days to go back and collect contacts
     strat3qdays::Int8 = 0
+    schoolclosuretime_start::Int16 = 0 
+    schoolclosuretime_end::Int16 = 0
+    contact_reduction::NTuple{5,Float64} = (1,1,1,1,1)
 end
 
 Base.@kwdef mutable struct ct_data_collect
@@ -124,14 +127,26 @@ function main(ip::ModelParameters)
     # split population in agegroups 
     grps = get_ag_dist()
 
+    # get the contact matrix
+    cm = contact_matrix()
+
+    sc_start = p.schoolclosuretime_start 
+    sc_end = p.schoolclosuretime_end
+
     # start the time loop
     for st = 1:p.modeltime
         # start of day
         if st == p.tpreiso ## time to introduce testing
             p.fpreiso = _fpreiso
         end
+        if st == sc_start
+            cm[2] = p.contact_reduction .* [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
+        end     
+        if st == sc_end
+            cm[2] = (1, 1, 1, 1, 1) .* [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
+        end
         _get_model_state(st, hmatrix) ## this datacollection needs to be at the start of the for loop
-        dyntrans(st, grps)
+        dyntrans(st, grps, cm)
         sw = time_update()
         # end of day
     end
@@ -513,7 +528,7 @@ function move_to_inf(x::Human)
  
     # h = prob of hospital, c = prob of icu AFTER hospital    
     h = (rand(Uniform(0.02, 0.03)), rand(Uniform(0.02, 0.03)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.28, 0.34)), rand(Uniform(0.60, 0.68)))
-    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.1)), rand(Uniform(0.05, 0.15))) 
+    c = (rand(Uniform(0.01, 0.015)), rand(Uniform(0.01, 0.015)), rand(Uniform(0.03, 0.05)), rand(Uniform(0.05, 0.2)), rand(Uniform(0.05, 0.15))) 
     mh = [0.01/5, 0.01/5, 0.0135/3, 0.01225/1.5, 0.04/2]     # death rate for severe cases.
     
     if p.calibration
@@ -776,7 +791,7 @@ export _get_betavalue
     return cnt
 end
 
-function dyntrans(sys_time, grps)
+function dyntrans(sys_time, grps, cm)
     totalmet = 0 # count the total number of contacts (total for day, for all INF contacts)
     totalinf = 0 # count number of new infected 
     ## find all the people infectious

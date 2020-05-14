@@ -43,13 +43,13 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     ag3 = vcat([cdr[i].g3 for i = 1:nsims]...)
     ag4 = vcat([cdr[i].g4 for i = 1:nsims]...)
     ag5 = vcat([cdr[i].g5 for i = 1:nsims]...)
-    #mydfs = Dict("all" => all, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
-    mydfs = Dict("all" => allag)
+    mydfs = Dict("all" => allag, "ag1" => ag1, "ag2" => ag2, "ag3" => ag3, "ag4" => ag4, "ag5" => ag5)
+    #mydfs = Dict("all" => allag)
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
-    c1 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
-    c2 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
+    c1 = Symbol.((:LAT, :INF, :HOS, :ICU, :DED), :_INC)
+    c2 = Symbol.((:LAT, :INF, :HOS, :ICU, :DED), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
