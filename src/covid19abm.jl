@@ -56,10 +56,10 @@ Base.@kwdef mutable struct ct_data_collect
     total_symp_id::Int64 = 0  # total symptomatic identified
     totaltrace::Int64 = 0     # total contacts traced
     totalisolated::Int64 = 0  # total number of people isolated
-    iso_sus::Int64 = 0        # total susceptible isolated 
-    iso_lat::Int64 = 0        # total latent isolated
-    iso_asymp::Int64 = 0      # total asymp isolated
-    iso_symp::Int64 = 0       # total symp (mild, inf) isolated
+    iso_sus::Int64 = 0        # total susceptible isolated IN DAYS
+    iso_lat::Int64 = 0        # total latent isolated IN DAYS
+    iso_asymp::Int64 = 0      # total asymp isolated IN DAYS
+    iso_symp::Int64 = 0       # total symp (mild, inf) isolated IN DAYS
 end
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
@@ -347,6 +347,9 @@ function insert_infected(health, num, ag)
                 move_to_pre(x) ## the swap may be asymp, mild, or severe, but we can force severe in the time_update function
             elseif health == LAT 
                 move_to_latent(x)
+                #if the person is moving to latent, let them expire immediately. 
+                #this removes the model artifact of "dipping" at the start of simulations.
+                x.tis = x.exp  
             elseif health == INF
                 move_to_infsimple(x)
             elseif health == REC 
@@ -615,10 +618,11 @@ function move_to_recovered(h::Human)
     h.health = REC
     h.swap = UNDEF
     h.tis = 0 
-    h.exp = 999 ## stay recovered indefinitely
-    h.iso = false ## a recovered person has ability to meet others
-    _set_isolation(h, false)  # do not set the isovia property here.  
-    # isolation property has no effect in contact dynamics anyways (unless x == SUS)
+    h.exp = 999 ## stay recovered indefinitely    
+    # do not set isolation property for recovered. 
+    # if they were isolated through contact tracing, they will unisolate automatically. 
+    # to do: check other pathways. 
+    # _set_isolation(h, false)  # do not set the isovia property here.      
 end
 
 function apply_ct_strategy(y::Human)
@@ -631,7 +635,7 @@ function apply_ct_strategy(y::Human)
         y.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
         ct_data.totalisolated += 1  ## update counter               
     end
-    if p.ctstrat == 2 
+    if p.ctstrat == 2 ## not really useful
         if y.health in (PRE, ASYMP, MILD, MISO, INF, IISO)
             _set_isolation(y, true, :ct)
             iso = true
@@ -654,15 +658,6 @@ function apply_ct_strategy(y::Human)
     # count data at time of infection... 
     # this is technical a bug... for example, a susceptible individual may be quarantined for 14 days 
     # but because they still have contacts, they may become sick and the category of the count should change. 
-    if yhealth == INF || yhealth == MILD || yhealth == PRE
-        ct_data.iso_symp += 1
-    elseif yhealth == LAT 
-        ct_data.iso_lat += 1
-    elseif yhealth == ASYMP 
-        ct_data.iso_asymp += 1
-    else        
-        ct_data.iso_sus += 1 
-    end
 end
 
 function ct_dynamics(x::Human)
@@ -676,26 +671,18 @@ function ct_dynamics(x::Human)
     xs = x.swap
     dur = x.dur
     doi = x.doi
-    #fctcapture::Float16 = 0.0 ## how many of contacts of the infected are we tracing.     
-    #cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
-    #cdaysback::Int8 = 0 ## number of days to go back and collect contacts
-    # tracing::Bool = false ## are we tracing contacts for this individual?
-    # tracestart::Int8 = -1 ## when to start tracing, based on values sampled for x.dur
-    # traceend::Int8 = -1 ## when to end tracing
-    # tracedby::UInt16 = 0 ## is the individual traced? property represents the index of the infectious person 
-    # tracedxp::UInt16 = 0 ## the trace is killed after tracedxp amount of days
-
-    ## person is newly infectious, calculate tracing numbers
+    
+    ## person is newly infectious, and will show symptoms. 
+    ## initialize tracestart and traceend times
     if xh == LAT && xs != ASYMP && doi == 0 
         if rand() < p.fctcapture 
-            #delta = dur[1] + dur[3] + p.cidtime # the latent + presymp + time to identification time
+            #delta = latent + presymp + time to identification time
             delta = dur[1] + dur[3] + Int(round(rand(Gamma(3.2, 1)))) #see chads email for reference
-            q = delta - p.cdaysback  
-            #println("delta = $delta, q = $q")
+            q = delta - p.cdaysback  ## how many days to trace prior to identification
             x.tracestart = max(0, q) # minimum of zero since delta < p.cdaysback
             x.traceend = delta
             (x.tracestart > x.traceend) && error("tracestart < traceend")
-            ct_data.total_symp_id += 1 ## update the data collection counter
+            ct_data.total_symp_id += 1 ## update ct data ctr: total number of symptomatic identified
         end
     end
 
@@ -716,6 +703,18 @@ function ct_dynamics(x::Human)
     end
 
     if x.tracedxp > 0  # person was traced, isolated, and will be for x days
+        x.iso == false && error("a traced person should always be isolated until the trace is killed")
+        # collect stats on the traced individuals         
+        if xh == INF || xh == MILD || xh == PRE
+            ct_data.iso_symp += 1
+        elseif xh == LAT 
+            ct_data.iso_lat += 1
+        elseif xh == ASYMP 
+            ct_data.iso_asymp += 1
+        else        
+            ct_data.iso_sus += 1 
+        end
+
         x.tracedxp -= 1
         if x.tracedxp == 0 
             # check whether isolation is turned on/off based on ctstrat
@@ -726,7 +725,7 @@ function ct_dynamics(x::Human)
                     # if strategy 3, only those that are tested positive are furthered isolated for 14 days.
                     _set_isolation(x, true) ## isovia should already be set to :ct 
                     x.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
-                    ct_data.totalisolated += 1  ## update counter
+                    #ct_data.totalisolated += 1  ## update counter  (BUG: double counting)
                 else 
                     _set_isolation(x, false) ## isovia should already be set to :ct 
                     x.isovia = :null # not isolated via contact tracing anymore
@@ -832,85 +831,6 @@ function dyntrans(sys_time, grps)
     return totalmet, totalinf
 end
 export dyntrans
-
-function dyntrans_nosus(sys_time)
-    totalinf = 0
-    ## find all the people infectious
-    infs = findall(x -> x.health in (PRE, ASYMP, MILD, MISO, INF, IISO), humans)
-    tomeet = map(1:length(agebraks)) do grp ## will also meet dead people, but ignore for now because it's such a small group
-        findall(humans) do h
-            c1 = h.ag == grp 
-            c2 = h.health == SUS ? !(h.iso) : true
-            return c1 && c2
-        end
-    end
-    #length(tomeet) <= 5 && return totalinf
-    for xid in infs
-        x = humans[xid]
-        ag = x.ag   
-        ih = x.health
-        if x.iso ## isolated infectious person has limited contacts
-            cnt = rand() < 0.5 ? 0 : rand(1:3)
-        else 
-            cnt = rand(nbs[ag])  ## get number of contacts/day
-        end
-        #cnt >= length(tomeet[ag]) && error("error here")
-        
-        # distribute cnt_meet to different groups based on contact matrix. 
-        # these are not probabilities, but proportions. be careful. 
-        # going from cnt to the gpw array might remove a contact or two due to rounding. 
-        gpw = Int.(round.(cm[ag]*cnt)) 
-        #println("cnt: $cnt, gpw: $gpw")
-        # let's stratify the human population in it's age groups. 
-        # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
-        # enumerate over the 15 groups and randomly select contacts from each group
-        for (i, g) in enumerate(gpw)
-            if length(tomeet[i]) > 0 
-                meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
-                ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
-                for j in meet
-                    y = humans[j]
-                    ## if we are tracing the infected individual, record contacts
-                    if x.tracing  
-                        if y.tracedby == 0 
-                            y.tracedby = x.idx
-                            y.tracedxp = 14 ## trace isolation will last for 14 days before expiry 
-                        end
-                    end                    
-                    if y.health == SUS && y.swap == UNDEF && !y.iso #i.e. a wasted contact
-                        bf = p.β ## baseline PRE
-                        # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
-                        if ih == ASYMP
-                            bf = bf * 0.11
-                        elseif ih == MILD || ih == MISO 
-                            bf = bf * 0.44
-                        elseif ih == INF || ih == IISO 
-                            bf = bf * 0.89
-                        end
-                        if rand() < bf
-                            totalinf += 1
-                            y.swap = LAT
-                            y.exp = y.tis   ## force the move to latent in the next time step.
-                            y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
-                        end  
-                    end
-                end
-            end            
-        end
-    end
-    return totalinf 
-end
-export dyntrans
-
-### old contact matrix
-# function contact_matrix()
-#     CM = Array{Array{Float64, 1}, 1}(undef, 4)
-#     CM[1]=[0.5712, 0.3214, 0.0722, 0.0353]
-#     CM[2]=[0.1830, 0.6253, 0.1423, 0.0494]
-#     CM[3]=[0.1336, 0.4867, 0.2723, 0.1074]    
-#     CM[4]=[0.1290, 0.4071, 0.2193, 0.2446]
-#     return CM
-# end
 
 function contact_matrix() 
     # regular contacts, just with 5 age groups. 
