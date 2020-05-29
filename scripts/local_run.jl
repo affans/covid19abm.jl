@@ -63,6 +63,11 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
         yaf = compute_yearly_average(df)       
         fn = string("$(folderprefix)/timelevel_", k, ".dat")   
         CSV.write(fn, yaf)       
+
+        # write the secondary (Ro) values 
+        secvals = unstack(df, :time, :sim, :secondarys)
+        fn = string("$(folderprefix)/secondarys_", k, ".dat")   
+        CSV.write(fn, secvals)       
     end
     return mydfs
 end
@@ -97,7 +102,7 @@ function compute_yearly_average(df)
     return ya
 end
 
-function savestr(p::ModelParameters, custominsert="/", customstart="")
+function savestr(p::ModelParameters, custominsert="simresults", customstart="")
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
     taustr = replace(string(p.τmild), "." => "")
@@ -110,12 +115,19 @@ function savestr(p::ModelParameters, custominsert="/", customstart="")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fsev = replace(string(p.fsevere), "." => "")    
     frelasymp = replace(string(p.frelasymp), "." => "")
-    strat = replace(string(p.ctstrat), "." => "")
+    
+    if p.ctstrat == 1 
+        strat = "strat1sc" 
+    elseif p.ctstrat == 3
+        strat = "strat3s" * string(p.strat3qdays)
+    else 
+        strat = "strat0"
+    end
     pct = replace(string(p.fctcapture), "." => "")
     cct = replace(string(p.fcontactst), "." => "")
     idt = replace(string(p.cidtime), "." => "") 
     tback = replace(string(p.cdaysback), "." => "")     
-    fldrname = "/data/covid19abm/simresults/$(custominsert)/$(customstart)_$(prov)_strat$(strat)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fldrname = "/data/covid19abm/$(custominsert)/$(customstart)_$(prov)_$(strat)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
     mkpath(fldrname)
 end
 

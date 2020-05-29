@@ -139,7 +139,7 @@ function main(ip::ModelParameters)
 end
 export main
 
-reset_params_default() = reset_params(ModelParameters())
+reset_params() = reset_params(ModelParameters())
 function reset_params(ip::ModelParameters)
     # the p is a global const
     # the ip is an incoming different instance of parameters 
@@ -186,7 +186,14 @@ function _collectdf(hmatrix)
     _names_prev = Symbol.(string.((Symbol.(instances(HEALTH)[1:end - 1])), "_PREV"))
     _names = vcat(_names_inc..., _names_prev...)
     datf = DataFrame(mdf, _names)
+
+    lat_inc = mdf_inc[:, 2]
+    inf_prv = vec(sum(mdf_prev[:, 3:8], dims=2))
+    secondarys = lat_inc ./ inf_prv 
+    replace!(secondarys, NaN => 0)
+    replace!(secondarys, Inf => 0)
     insertcols!(datf, 1, :time => 1:p.modeltime) ## add a time column to the resulting dataframe
+    insertcols!(datf, 2, :secondarys => secondarys) ## add a time column to the resulting dataframe
     return datf
 end
 
@@ -652,7 +659,7 @@ function apply_ct_strategy(y::Human)
          # in strategy 3, all traced individuals are isolated for only 4 days. 
          _set_isolation(y, true, :ct)
          iso = true
-         y.tracedxp = p.strat3qdays ## trace isolation will last for 14 days before expiry                
+         y.tracedxp = p.strat3qdays
          ct_data.totalisolated += 1  ## update counter 
     end
     # count data at time of infection... 
@@ -802,7 +809,7 @@ function dyntrans(sys_time, grps)
                         y.nextday_meetcnt = y.nextday_meetcnt - 1 # remove a contact
                         totalmet += 1
                         # there is a contact to recieve
-                         # tracing dynamics
+                        # tracing dynamics
                         
                         if x.tracing  
                             if y.tracedby == 0 && rand() < p.fcontactst
@@ -811,19 +818,17 @@ function dyntrans(sys_time, grps)
                             end
                         end
                         
-                    # tranmission dynamics
+                        # tranmission dynamics
                         if  y.health == SUS && y.swap == UNDEF                  
                             beta = _get_betavalue(sys_time, xhealth)
                             if rand() < beta
                                 totalinf += 1
                                 y.swap = LAT
                                 y.exp = y.tis   ## force the move to latent in the next time step.
-                                y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom
+                                y.sickfrom = xhealth ## stores the infector's status to the infectee's sickfrom                            
                             end  
-                        end
-    
-                    end
-                    
+                        end    
+                    end                    
                 end
             end
         end        
