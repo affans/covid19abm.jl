@@ -20,9 +20,9 @@ const cv=covid19abm
 addprocs(SlurmManager(500), N=17, topology=:master_worker, exeflags="--project=.")
 @everywhere using covid19abm
 
-function run(myp::ModelParameters, nsims=500, folderprefix="./")
-    println("starting $nsims simulations...\nsave folder set to $(folderprefix)")
-    dump(myp)
+function run(myp::ModelParameters, nsims=500, folderprefix="./", writefiles = true)
+    println("starting $nsims simulations...\nwriting files: $writefiles")
+    #dump(myp)
     myp.calibration && error("can not run simulation, calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
     cdr = pmap(1:nsims) do x                 
@@ -32,10 +32,10 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     println("simulations finished")
     println("total size of simulation dataframes: $(Base.summarysize(cdr))")
     ## write the infectors 
-    writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
+    writefiles && writedlm("$(folderprefix)/infectors.dat", [cdr[i].infectors for i = 1:nsims])    
 
     ## write contact numbers
-    writedlm("$(folderprefix)/ctnumbers.dat", [cdr[i].ct_numbers for i = 1:nsims])    
+    writefiles && writedlm("$(folderprefix)/ctnumbers.dat", [cdr[i].ct_numbers for i = 1:nsims])    
     ## stack the sims together
     allag = vcat([cdr[i].a  for i = 1:nsims]...)
     ag1 = vcat([cdr[i].g1 for i = 1:nsims]...)
@@ -56,18 +56,18 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
         for c in vcat(c1..., c2...)
             udf = unstack(df, :time, :sim, c) 
             fn = string("$(folderprefix)/simlevel_", lowercase(string(c)), "_", k, ".dat")
-            CSV.write(fn, udf)
+            writefiles && CSV.write(fn, udf)
         end
         println("saving dataframe time level: $k")
         # time level, save file per age group
         yaf = compute_yearly_average(df)       
         fn = string("$(folderprefix)/timelevel_", k, ".dat")   
-        CSV.write(fn, yaf)       
+        writefiles && CSV.write(fn, yaf)       
 
         # write the secondary (Ro) values 
         secvals = unstack(df, :time, :sim, :secondarys)
         fn = string("$(folderprefix)/secondarys_", k, ".dat")   
-        CSV.write(fn, secvals)       
+        writefiles && CSV.write(fn, secvals)       
     end
     return mydfs
 end
@@ -136,7 +136,7 @@ function _calibrate(nsims, myp::ModelParameters)
     vals = zeros(Int64, nsims)
     println("calibrating with beta: $(myp.β), total sims: $nsims, province: $(myp.prov)")
     println("calibration parameters:")
-    dump(myp)
+    #dump(myp)
     cdr = pmap(1:nsims) do i 
         h = main(myp) ## gets the entire model. 
         val = sum(_get_column_incidence(h, covid19abm.LAT))            
