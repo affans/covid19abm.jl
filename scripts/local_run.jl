@@ -17,12 +17,12 @@ const cv=covid19abm
 #addprocs(30, exeflags="--project=.")
 #@everywhere using covid19abm
 
-addprocs(SlurmManager(500), N=17, topology=:master_worker, exeflags="--project=.")
+addprocs(SlurmManager(288), N=9, topology=:master_worker, exeflags="--project=.")
 @everywhere using covid19abm
 
 function run(myp::ModelParameters, nsims=500, folderprefix="./")
     println("starting $nsims simulations...\nsave folder set to $(folderprefix)")
-    dump(myp)
+    #dump(myp)
     myp.calibration && error("can not run simulation, calibration is on.")
     # will return 6 dataframes. 1 total, 4 age-specific 
     cdr = pmap(1:nsims) do x                 
@@ -48,8 +48,10 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 
-    c1 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
-    c2 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
+    #c1 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_INC)
+    #c2 = Symbol.((:LAT, :ASYMP, :MILD, :MISO, :INF, :IISO, :HOS, :ICU, :DED), :_PREV)
+    c1 = Symbol.((:LAT, ), :_INC)
+    c2 = Symbol.((:LAT, ), :_PREV)
     for (k, df) in mydfs
         println("saving dataframe sim level: $k")
         # simulation level, save file per health status, per age group
@@ -115,7 +117,8 @@ function savestr(p::ModelParameters, custominsert="simresults", customstart="")
     tpreiso = replace(string(p.tpreiso), "." => "")
     fsev = replace(string(p.fsevere), "." => "")    
     frelasymp = replace(string(p.frelasymp), "." => "")
-    
+    fasymp = replace(string(p.fasymp), "." => "") 
+    fasympiso = replace(string(p.fasympiso), "." => "")
     if p.ctstrat == 1 
         strat = "strat1sc" 
     elseif p.ctstrat == 3
@@ -127,7 +130,7 @@ function savestr(p::ModelParameters, custominsert="simresults", customstart="")
     cct = replace(string(p.fcontactst), "." => "")
     idt = replace(string(p.cidtime), "." => "") 
     tback = replace(string(p.cdaysback), "." => "")     
-    fldrname = "/data/covid19abm/$(custominsert)/$(customstart)_$(prov)_$(strat)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)/"
+    fldrname = "/data/covid19abm/$(custominsert)/$(customstart)_$(prov)_$(strat)_pct$(pct)_cct$(cct)_idt$(idt)_tback$(tback)_fsev$(fsev)_tau$(taustr)_fmild$(fstr)_q$(eldr)_qag$(eldqag)_relasymp$(frelasymp)_asymp$(fasymp)_tpreiso$(tpreiso)_preiso$(fpreiso)_asympiso$(fasympiso)/"
     mkpath(fldrname)
 end
 

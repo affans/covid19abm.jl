@@ -43,6 +43,7 @@ end
     fpre::Float64 = 1.0 ## NOT USED ANYMORE (percent going to presymptomatic)
     fpreiso::Float64 = 0.0 ## percent that is isolated at the presymptomatic stage
     tpreiso::Int64 = 0## preiso is only turned on at this time. 
+    fasympiso::Float64 = 0.0 # isolation of presymptomatic
     frelasymp::Float64 = 0.11 ## relative transmission of asymptomatic
     ctstrat::Int8 = 0 ## strategy 
     fctcapture::Float16 = 0.0 ## how many symptomatic people identified
@@ -441,7 +442,8 @@ function move_to_latent(x::Human)
     x.exp = x.dur[1] # get the latent period
     # the swap to asymptomatic is based on age group.
     # ask seyed for the references
-    asymp_pcts = (0.25, 0.25, 0.14, 0.07, 0.07)    
+    #asymp_pcts = (0.25, 0.25, 0.14, 0.07, 0.07)    
+    asymp_pcts = (p.fasymp, p.fasymp, p.fasymp, p.fasymp, p.fasymp)    
     x.swap = rand() < asymp_pcts[x.ag] ? ASYMP : PRE 
     ## in calibration mode, latent people never become infectious.
     if p.calibration 
@@ -459,6 +461,7 @@ function move_to_asymp(x::Human)
     x.swap = REC 
     # x.iso property remains from either the latent or presymptomatic class
     # if x.iso is true, the asymptomatic individual has limited contacts
+    rand() < p.fasympiso && _set_isolation(x, true, :pi)
 end
 export move_to_asymp
 
@@ -756,11 +759,14 @@ export ct_dynamics
     bf = BETAS[sys_time]
     # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
     if xhealth == ASYMP
-        bf = bf * p.frelasymp
+        #bf = bf * p.frelasymp 
+        bf = bf * rand(5:17)/100
     elseif xhealth == MILD || xhealth == MISO 
-        bf = bf * 0.44
+        #bf = bf * 0.44
+        bf = bf * rand(39:49)/100
     elseif xhealth == INF || xhealth == IISO 
-        bf = bf * 0.89
+        #bf = bf * 0.89
+        bf = bf * rand(84:94)/100
     end
     return bf
 end
