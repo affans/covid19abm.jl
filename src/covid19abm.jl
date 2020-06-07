@@ -159,12 +159,12 @@ function reset_params(ip::ModelParameters)
     # resize the human array to change population size
     resize!(humans, p.popsize)
 end
-export reset_params, reset_params_default
+export reset_params
 
 function _model_check() 
     ## checks model parameters before running 
+    ## move code from here to unit tests.
     (p.fctcapture > 0 && p.fpreiso > 0) && error("Can not do contact tracing and ID/ISO of pre at the same time.")
-    (p.fctcapture > 0 && p.maxtracedays == 0) && error("maxtracedays can not be zero")
 end
 
 ## Data Collection/ Model State functions
