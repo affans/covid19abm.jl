@@ -17,7 +17,7 @@ const cv=covid19abm
 #addprocs(30, exeflags="--project=.")
 #@everywhere using covid19abm
 
-addprocs(SlurmManager(512), N=16, topology=:master_worker, exeflags="--project=.")
+addprocs(SlurmManager(288), N=9, topology=:master_worker, exeflags="--project=.")
 @everywhere using covid19abm
 
 function run(myp::ModelParameters, nsims=500, folderprefix="./")
@@ -48,10 +48,9 @@ function run(myp::ModelParameters, nsims=500, folderprefix="./")
     g9 = vcat([cdr[i].g9 for i = 1:nsims]...)
     g10 = vcat([cdr[i].g10 for i = 1:nsims]...)
     g11 = vcat([cdr[i].g11 for i = 1:nsims]...)
-    g12 = vcat([cdr[i].g12 for i = 1:nsims]...)
    
     mydfs = Dict("all" => allag, "c1" => g1, "c2" => g2, "c3" => g3, "c4" => g4, "c5" => g5, "c6" => g6, "c7" => g7, "c8" => g8,
-                    "c9" => g9, "c10" => g10, "c11" => g11, "c12" => g12)
+                    "c9" => g9, "c10" => g10, "c11" => g11)
 
     ## save at the simulation and time level
     ## to ignore for now: miso, iiso, mild 

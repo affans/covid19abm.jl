@@ -39,12 +39,12 @@ end
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 ## constants 
-const HSIZE = 816
+const HSIZE = 798 #old:816
 const humans = Array{Human}(undef, HSIZE) # run 100,000
 const p = ModelParameters()  ## setup default parameters
 const agebraks = @SVector [0:4, 5:19, 20:49, 50:64, 65:99]
-const bhpdist = @SVector [8, 164, 149, 34, 34, 161, 80, 80, 60, 9, 19, 18]
-const bhpcats = @SVector [:c1, :c2, :c3, :c4, :c5, :c6, :c7, :c8, :c9, :c10, :c11, :c12]
+const bhpdist = @SVector [8, 164, 149, 34, 34, 161, 80, 80, 60, 9, 19]
+const bhpcats = @SVector [:c1, :c2, :c3, :c4, :c5, :c6, :c7, :c8, :c9, :c10, :c11]
 
 export ModelParameters, HEALTH, Human, humans
 
@@ -57,12 +57,20 @@ function runsim(simnum, ip::ModelParameters)
     ags = [x.ag for x in humans] # store a vector of the age group distribution 
 
     ## count bhp sick from
-    sr1 = sr2 = 0
+    sr1 = sr2 = sr3 = sr4 = sr5 = sr6 = 0
     for x in humans 
         if x.bhpsick == 1
             sr1 +=1 
         elseif x.bhpsick == 2
             sr2 += 1
+        elseif x.bhpsick == 3
+            sr3 += 1
+        elseif x.bhpsick == 4
+            sr4 += 1
+        elseif x.bhpsick == 5
+            sr5 += 1
+        elseif x.bhpsick == 6
+            sr6 += 1
         end
     end
 
@@ -79,8 +87,7 @@ function runsim(simnum, ip::ModelParameters)
     g9 = _collectdf(spl[9])
     g10 = _collectdf(spl[10])
     g11 = _collectdf(spl[11])
-    g12 = _collectdf(spl[12])
-
+    
     insertcols!(all, 1, :sim => simnum);    
     insertcols!(g1, 1, :sim => simnum); 
     insertcols!(g2, 1, :sim => simnum); 
@@ -93,8 +100,7 @@ function runsim(simnum, ip::ModelParameters)
     insertcols!(g9, 1, :sim => simnum); 
     insertcols!(g10, 1, :sim => simnum); 
     insertcols!(g11, 1, :sim => simnum); 
-    insertcols!(g12, 1, :sim => simnum); 
-    return (a=all, g1=g1, g2=g2, g3=g3, g4=g4, g5=g5, g6=g6, g7=g7, g8=g8, g9=g9, g10=g10, g11=g11, g12=g12, infectors=infectors, bhpsicks=(sr1, sr2))
+    return (a=all, g1=g1, g2=g2, g3=g3, g4=g4, g5=g5, g6=g6, g7=g7, g8=g8, g9=g9, g10=g10, g11=g11, infectors=infectors, bhpsicks=(sr1, sr2))
 
 end
 export runsim
@@ -580,86 +586,116 @@ function dyntrans()
         ag = x.bhpcat  
         ih = x.health
 
-        # get rule 1 and 2 matrices
-        nbs1 = pt_rule1_contacts()
-        nbs2 = pt_rule2_contacts()
-        cm1 = pt_rule1_matrix()
-        cm2 = pt_rule2_matrix()
-        if x.iso ## isolated infectious person has limited contacts
-            cnt = rand(1:3)
-        else 
-            ## get two counts ... one for rule 1 and one for rule 2
-            cnt1 = rand(nbs1[ag])  ## get number of contacts/day
-            cnt2 = rand(nbs2[ag])  ## get number of contacts/day
-        end
-        #cnt >= length(tomeet[ag]) && error("error here")
-        
-        # distribute cnt_meet to different groups based on contact matrix. 
-        # these are not probabilities, but proportions. be careful. 
-        # going from cnt to the gpw array might remove a contact or two due to rounding. 
-        gpw1 = Int.(round.(cm1[ag]*cnt1)) 
-        gpw2 = Int.(round.(cm2[ag]*cnt2)) 
-        #println("cnt: $cnt, gpw: $gpw")
-        # let's stratify the human population in it's age groups. 
-        # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
-        # enumerate over the 15 groups and randomly select contacts from each group
-        for (i, g) in enumerate(gpw1)
-            (g == 0 || length(tomeet[i]) == 0) && continue
-            meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
-            ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
-            for j in meet
-                y = humans[j]
-                if y.health == SUS && y.swap == UNDEF
-                    bf = p.β ## baseline PRE
-                    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
-                    if ih == ASYMP
-                        bf = bf * 0.11
-                    elseif ih == MILD || ih == MISO 
-                        bf = bf * 0.44
-                    elseif ih == INF || ih == IISO 
-                        bf = bf * 0.89
+        gpw = get_bhp_counts(ag)
+        gp_idx = 0 
+        for gpw1 in gpw 
+            gp_idx += 1
+            for (i, g) in enumerate(gpw1)
+                (g == 0 || length(tomeet[i]) == 0) && continue
+                meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
+                ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
+                for j in meet
+                    y = humans[j]
+                    if y.health == SUS && y.swap == UNDEF
+                        bf = p.β ## baseline PRE
+                        # if gp_idx == 6
+                        #     bf = bf * 0.79 # scenario 1, secnario 2 0.22
+                        # end
+                        # matrix 1: reduction 1, 0.50 
+                        #           reduction 2, 0.22
+
+                        # matrix 2, 3: reduction 1, 0.04
+                        #           reduction 2, 0.7 surgical (only 30% effectiveness)
+
+                        # matrix 4: reduction 1, 0.50 
+                        #           reduction 2, 0.22
+
+                        # matrix 5, 6: reduction 1, 0.79
+                        # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
+                        if ih == ASYMP
+                            bf = bf * 0.11
+                        elseif ih == MILD || ih == MISO 
+                            bf = bf * 0.44
+                        elseif ih == INF || ih == IISO 
+                            bf = bf * 0.89
+                        end
+
+                        if rand() < bf
+                            totalinf += 1
+                            y.swap = LAT
+                            y.exp = y.tis   ## force the move to latent in the next time step.
+                            y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
+                            y.bhpsick = gp_idx
+                        end  
                     end
-                    if rand() < bf
-                        totalinf += 1
-                        y.swap = LAT
-                        y.exp = y.tis   ## force the move to latent in the next time step.
-                        y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
-                        y.bhpsick = 1
-                    end  
-                end
-            end            
-        end
-        for (i, g) in enumerate(gpw2)
-            (g == 0 || length(tomeet[i]) == 0) && continue
-            meet = rand(tomeet[i], g)    # sample 'g' number of people from this group  with replacement
-            ## remember, two infected people may meet the same susceptible so its possible that disease can be transferred "twice"
-            for j in meet
-                y = humans[j]
-                if y.health == SUS && y.swap == UNDEF
-                    bf = p.β ## baseline PRE
-                    # values coming from FRASER Figure 2... relative tranmissibilities of different stages.
-                    if ih == ASYMP
-                        bf = bf * 0.11
-                    elseif ih == MILD || ih == MISO 
-                        bf = bf * 0.44
-                    elseif ih == INF || ih == IISO 
-                        bf = bf * 0.89
-                    end
-                    if rand() < bf
-                        totalinf += 1
-                        y.swap = LAT
-                        y.exp = y.tis   ## force the move to latent in the next time step.
-                        y.sickfrom = ih ## stores the infector's status to the infectee's sickfrom
-                        y.bhpsick = 2
-                    end  
-                end
-            end            
-        end
+                end            
+            end
+        end        
     end
     return totalinf 
 end
 export dyntrans
 
+function get_bhp_counts(ag)
+    ## combination of 4 H-H matrix, and 6 H-S matrix.
+    nbh1 = pt_rule1_contacts()
+    nbh2 = pt_rule2_contacts()
+    nbh3 = pt_rule3_contacts()
+    nbh4 = pt_rule4_contacts()
+    nbs1 = sr_rule1_contacts()
+    nbs2 = sr_rule2_contacts()
+    nbs_array = [nbh1[ag], nbh2[ag], nbh3[ag], nbh4[ag], nbs1[ag], nbs2[ag]] ## collect the appropriate rows from the matrix. 
+    tcnts = rand.(nbs_array)
+
+    cm1 = pt_rule1_matrix()
+    cm2 = pt_rule2_matrix()
+    cm3 = pt_rule3_matrix()
+    cm4 = pt_rule4_matrix()
+    sm1 = sr_rule1_matrix()
+    sm2 = sr_rule2_matrix()
+    cm_array = [cm1[ag], cm2[ag], cm3[ag], cm4[ag], sm1[ag], sm2[ag]]
+
+    # if x.iso ## isolated infectious person has limited contacts
+    #     cnt = rand(1:3)
+    # else 
+    #     ## get two counts ... one for rule 1 and one for rule 2
+    #     cnt1 = rand(nbs1[ag])  ## get number of contacts/day
+    #     cnt2 = rand(nbs2[ag])  ## get number of contacts/day
+    # end
+
+    # distribute cnt_meet to different groups based on contact matrix. 
+    # these are not probabilities, but proportions. be careful. 
+    # going from cnt to the gpw array might remove a contact or two due to rounding. 
+    #gpw1 = Int.(round.(cm1[ag]*cnt1)) 
+    #gpw2 = Int.(round.(cm2[ag]*cnt2)) 
+    #println(tcnts)
+    #println(cm_array);
+    distributed_raw = (tcnts .* cm_array) #multiply the total counts by the matrix to distribute the contacts among the groups
+    distributed_rnd = [Int.(round.(inner_array)) for inner_array in distributed_raw] # round the distributed contacts ... problem: the rounding may lose a contact here or there
+    missed_cnts = tcnts .- sum.(distributed_rnd)  # see what the difference is between the rounded distributed contacts and true contacts tcnts
+    # missed_cnts tells us which "location matrix" was not distributed properly.
+    #println(distributed_rnd)
+    #println(distributed_raw)
+    # we have to redistribute the missed contacts
+    # find which location matrix has counts we need to distribute
+    for mc in missed_cnts 
+        #mc < 0 && error("mc $mc is less than zero: tcnts $tcnts and sums $(sum.(distributed_rnd)) \n raw: $distributed_raw")
+        mc <= 0 && continue # distributed counts equals tcnts
+        # go through the dc array and see which one of them are zero 
+        nonzeros = findall(x -> x > 0 && x < 0.6, distributed_raw[mc]) ## means that this was rounded down to 0       
+        if length(nonzeros) > 0 
+            dist_to = rand(nonzeros, mc)
+            for dx in dist_to 
+                distributed_rnd[mc][dx] += 1
+            end
+        end        
+    end
+    #[round.(inner_array) for inner_array in distributed_cnts]
+    return distributed_rnd
+    #println(distributed_cnts)
+    #sum_distibutions = sum.(distributed_cnts)
+end
+export get_bhp_counts
 
 ## old contact matrix
 # function contact_matrix()
@@ -671,68 +707,25 @@ export dyntrans
 #     return CM
 # end
 
-function contact_matrix() 
-    # regular contacts, just with 5 age groups. 
-    #  0-4, 5-19, 20-49, 50-64, 65+
-    CM = Array{Array{Float64, 1}, 1}(undef, 5)
-    CM[1] = [0.2287, 0.1839, 0.4219, 0.1116, 0.0539]
-    CM[2] = [0.0276, 0.5964, 0.2878, 0.0591, 0.0291]
-    CM[3] = [0.0376, 0.1454, 0.6253, 0.1423, 0.0494]
-    CM[4] = [0.0242, 0.1094, 0.4867, 0.2723, 0.1074]
-    CM[5] = [0.0207, 0.1083, 0.4071, 0.2193, 0.2446]
-    return CM
-end
-
-function bhp_matrix()
+## june 7, new bhp simulations with 6 contact matrix
+function pt_rule1_matrix()
     #  0-4, 5-19, 20-49, 50-64, 65+
     dd = Dict{Symbol, Array{Float64, 1}}()
-    CM = Array{Array{Float64, 1}, 1}(undef, 8)    
-    CM[1] = [0.6444, 0.1, 0.0185, 0.0185, 0.1, 0.1, 0.0185, 0]
-    CM[2] = [0.0063, 0.7704, 0.0012, 0.0023, 0.1481, 0.0469, 0.0012, 0.0235]
-    CM[3] = [0.0833, 0.0833, 0.5, 0.0833, 0.0833, 0.0833, 0.0833, 0]
-    CM[4] = [0.05, 0.05, 0.025, 0.75, 0.075, 0.025, 0.025, 0]
-    CM[5] = [0.0063, 0.1467, 0.0012, 0.0023, 0.6844, 0.1114, 0.0012, 0.0465]
-    CM[6] = [0.0112, 0.0826, 0.0021, 0.0041, 0.1979, 0.6587, 0.0021, 0.0413]
-    CM[7] = [0.0312, 0.0625, 0.0312, 0.0312, 0.0625, 0.0625, 0.7188, 0]
-    CM[8] = [0, 0.1242, 0, 0.0062, 0.4969, 0.1242, 0, 0.2484]
-    for i = 1:8
-        push!(dd, bhpcats[i] => CM[i])
-    end 
-    return dd
-end
-const cm = bhp_matrix()
-
-function bhp_rule1_matrix()
-    #  0-4, 5-19, 20-49, 50-64, 65+
-    dd = Dict{Symbol, Array{Float64, 1}}()
-    CM = Array{Array{Float64, 1}, 1}(undef, 8)       
-    CM[1] = [1, 0, 0, 0, 0, 0, 0, 0]
-    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0]
-    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0]
-    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0]
-    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0]
-    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0]
-    CM[7] = [0, 0, 0, 0, 0, 0, 0, 0]
-    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1]
-    for i = 1:8
-        push!(dd, bhpcats[i] => CM[i])
-    end 
-    return dd
-end
-
-function bhp_rule2_matrix()
-    #  0-4, 5-19, 20-49, 50-64, 65+
-    dd = Dict{Symbol, Array{Float64, 1}}()
-    CM = Array{Array{Float64, 1}, 1}(undef, 8)    
-    CM[1] = [1, 0, 0, 0, 0, 0, 0, 0]
-    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0]
-    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0]
-    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0]
-    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0]
-    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0]
-    CM[7] = [0, 0, 0, 0, 0, 0, 0, 0]
-    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1]
-    for i = 1:8
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
+    
+    CM[1] = [0.536633663, 0.087128713, 0.031683168, 0.017821782, 0.003960396, 0.071287129, 0.023762376, 0.00990099, 0.023762376, 0.186138614, 0.007920792]
+    CM[2] = [0.005135987, 0.893311544, 0.001750905, 0.004902533, 0, 0.002801447, 0.006653438, 0, 0.00268472, 0.082525972, 0.000233454]
+    CM[3] = [0.002179243, 0.00204304, 0.895668755, 0, 0.005720512, 0.000544811, 0, 0.007627349, 0, 0.004222283, 0.081994007]
+    CM[4] = [0.005829016, 0.027202073, 0, 0.742227979, 0.000647668, 0.002590674, 0.007124352, 0, 0.001295337, 0.212435233, 0.000647668]
+    CM[5] = [0.001316656, 0, 0.02764977, 0.000658328, 0.754443713, 0.000658328, 0, 0.007241606, 0, 0.000658328, 0.207373272]
+    CM[6] = [0.006277245, 0.00418483, 0.000697472, 0.000697472, 0.000174368, 0.980470793, 0.001046207, 0.000523104, 0.003836094, 0.002092415, 0]
+    CM[7] = [0.004163775, 0.019777932, 0, 0.003816794, 0, 0.002081888, 0.860513532, 0.000346981, 0.003469813, 0.105829285, 0]
+    CM[8] = [0.002765487, 0, 0.030973451, 0, 0.006084071, 0.001659292, 0.000553097, 0.789823009, 0, 0, 0.168141593]
+    CM[9] = [0.001490498, 0.002856788, 0, 0.000248416, 0, 0.00273258, 0.001242082, 0, 0.990932803, 0.000496833, 0]
+    CM[10] = [0.044613194, 0.335548173, 0.014712862, 0.155671571, 0.000474608, 0.005695301, 0.144755577, 0, 0.001898434, 0.29663028, 0]
+    CM[11] = [0.002183406, 0.001091703, 0.32860262, 0.000545852, 0.171943231, 0, 0, 0.165938865, 0, 0, 0.329694323]
+    
+    for i = 1:length(bhpcats)
         push!(dd, bhpcats[i] => CM[i])
     end 
     return dd
@@ -741,102 +734,123 @@ end
 function pt_rule2_matrix()
     #  0-4, 5-19, 20-49, 50-64, 65+
     dd = Dict{Symbol, Array{Float64, 1}}()
-    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))       
-    CM[1] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
-    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
-    CM[7] = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
-    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
-    CM[9] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
-    CM[10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]
-    CM[11] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
+    
+    CM[1] = [0.055555556, 0.222222222, 0.222222222, 0.055555556, 0.055555556, 0.166666667, 0.055555556, 0.055555556, 0.055555556, 0.027777778, 0.027777778]
+    CM[2] = [0.009090909, 0.990909091, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[3] = [0.008928571, 0, 0.991071429, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[4] = [0.009259259, 0, 0, 0.990740741, 0, 0, 0, 0, 0, 0, 0]
+    CM[5] = [0.009259259, 0, 0, 0, 0.990740741, 0, 0, 0, 0, 0, 0]
+    CM[6] = [0.006263048, 0, 0, 0, 0, 0.993736952, 0, 0, 0, 0, 0]
+    CM[7] = [0.007352941, 0, 0, 0, 0, 0, 0.992647059, 0, 0, 0, 0]
+    CM[8] = [0.007352941, 0, 0, 0, 0, 0, 0, 0.992647059, 0, 0, 0]
+    CM[9] = [0.055555556, 0, 0, 0, 0, 0, 0, 0, 0.944444444, 0, 0]
+    CM[10] = [0.01, 0, 0, 0, 0, 0, 0, 0, 0, 0.99, 0]
+    CM[11] = [0.011904762, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.988095238]
+
     for i = 1:length(bhpcats)
         push!(dd, bhpcats[i] => CM[i])
     end 
     return dd
 end
 
-function pt_rule1_matrix()
+function pt_rule3_matrix()
     #  0-4, 5-19, 20-49, 50-64, 65+
     dd = Dict{Symbol, Array{Float64, 1}}()
     CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
-    CM[1] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[2] = [0, 0.977272727, 0, 0, 0, 0, 0.022727273, 0, 0, 0, 0, 0]
-    CM[3] = [0, 0, 0.97826087, 0, 0, 0, 0, 0.02173913, 0, 0, 0, 0]
-    CM[4] = [0, 0, 0, 0.967741935, 0, 0, 0.032258065, 0, 0, 0, 0, 0]
-    CM[5] = [0, 0, 0, 0, 0.967741935, 0, 0.00, 0.032258065, 0, 0, 0, 0]
-    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
-    CM[7] = [0, 0.041666667, 0, 0.020833333, 0, 0, 0.9375, 0, 0, 0, 0, 0]
-    CM[8] = [0, 0, 0.041666667, 0, 0.020833333, 0, 0, 0.9375, 0, 0, 0, 0]
-    CM[9] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
-    CM[10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[11] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    CM[12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    
+    CM[1] = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[2] = [ 0, 0.863636364, 0, 0.045454545, 0, 0, 0.090909091, 0, 0, 0, 0]
+    CM[3] = [ 0, 0, 0.95, 0, 0.05, 0, 0, 0, 0, 0, 0]
+    CM[4] = [ 0, 0.108991826, 0, 0.833787466, 0, 0, 0.057220708, 0, 0, 0, 0]
+    CM[5] = [ 0, 0, 0.115606936, 0, 0.884393064, 0, 0, 0, 0, 0, 0]
+    CM[6] = [ 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+    CM[7] = [ 0, 0.167014614, 0, 0.043841336, 0, 0, 0.78914405, 0, 0, 0, 0]
+    CM[8] = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[9] = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[10] = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[11] = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
     for i = 1:length(bhpcats)
         push!(dd, bhpcats[i] => CM[i])
     end 
     return dd
 end
 
-function negative_binomials() 
-    ## the means/sd here are calculated using _calc_avgag
-    means = [10.21, 16.793, 13.7950, 11.2669, 8.0027]
-    sd = [7.65, 11.7201, 10.5045, 9.5935, 6.9638]
-    totalbraks = length(means)
-    nbinoms = Vector{NegativeBinomial{Float64}}(undef, totalbraks)
-    for i = 1:totalbraks
-        p = 1 - (sd[i]^2-means[i])/(sd[i]^2)
-        r = means[i]^2/(sd[i]^2-means[i])
-        nbinoms[i] =  NegativeBinomial(r, p)
-    end
-    return nbinoms   
-end
+function pt_rule4_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
+        
+    CM[1] = [0.274509804, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.392156863, 0.019607843]
+    CM[2] = [0.003816794, 0.730916031, 0.001908397, 0.003816794, 0, 0.003816794, 0.183206107, 0, 0.001908397, 0.066793893, 0.003816794]
+    CM[3] = [0.004444444, 0.002222222, 0.731111111, 0, 0.004444444, 0.004444444, 0, 0.182222222, 0, 0.004444444, 0.066666667]
+    CM[4] = [0.018348624, 0.018348624, 0, 0.733944954, 0, 0.018348624, 0.055045872, 0, 0, 0.146788991, 0]
+    CM[5] = [0.019230769, 0, 0.019230769, 0, 0.769230769, 0.019230769, 0, 0.019230769, 0, 0, 0.153846154]
+    CM[6] = [0.006493506, 0.006493506, 0.006493506, 0.006493506, 0.006493506, 0.912337662, 0.019480519, 0.019480519, 0.012987013, 0.003246753, 0]
+    CM[7] = [0.006535948, 0.31372549, 0, 0.019607843, 0, 0.019607843, 0.588235294, 0, 0.003267974, 0.049019608, 0]
+    CM[8] = [0.006968641, 0, 0.285714286, 0, 0.006968641, 0.020905923, 0, 0.6271777, 0, 0, 0.052264808]
+    CM[9] = [0.004914005, 0.002457002, 0, 0, 0, 0.00982801, 0.002457002, 0, 0.98034398, 0, 0]
+    CM[10] = [0.117647059, 0.205882353, 0.011764706, 0.094117647, 0, 0.005882353, 0.088235294, 0, 0, 0.470588235, 0]
+    CM[11] = [0.006944444, 0.013888889, 0.208333333, 0, 0.111111111, 0, 0, 0.104166667, 0, 0, 0.555555556]
 
-function bhp_binomials()
-    dd = Dict{Symbol, DiscreteUniform}()
-    means = [12, 12, 9, 9, 12, 9, 11, 50]
-    lb = [11, 11, 7, 7, 11, 8, 9, 45]
-    hb = [13, 13, 10, 10, 13, 10, 12, 55]
-    for i = 1:8
-        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
-    end
-    return dd
-end
-const nbs = bhp_binomials()
-export negative_binomials, contact_matrix, nbs, cm
-
-
-function bhp_rule1_contacts()
-    dd = Dict{Symbol, DiscreteUniform}()
-    means = [0, 2, 0, 0, 1, 2, 0, 38]
-    lb = [0, 1, 0, 0, 0, 1, 0, 35]
-    hb = [1, 2, 1, 1, 1, 2, 0, 40]
-    for i = 1:8
-        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
-    end
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => CM[i])
+    end 
     return dd
 end
 
-function bhp_rule2_contacts()
-    dd = Dict{Symbol, DiscreteUniform}()
-    means = [0, 3, 0, 0, 0, 3, 0, 0]
-    lb = [0, 2, 0, 0, 0, 2, 0, 0]
-    hb = [1, 4, 1, 1, 1, 4, 0, 1]
-    for i = 1:8
-        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
-    end
+function sr_rule1_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
+        
+    CM[1] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[2] = [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[3] = [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[4] = [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0]
+    CM[5] = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+    CM[6] = [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+    CM[7] = [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]
+    CM[8] = [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+    CM[9] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    CM[10] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    CM[11] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => CM[i])
+    end 
+    return dd
+end
+
+function sr_rule2_matrix()
+    #  0-4, 5-19, 20-49, 50-64, 65+
+    dd = Dict{Symbol, Array{Float64, 1}}()
+    CM = Array{Array{Float64, 1}, 1}(undef, length(bhpcats))    
+            
+    CM[1] = [0.274509804, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.039215686, 0.392156863, 0.019607843]
+    CM[2] = [0.003816794, 0.730916031, 0.001908397, 0.003816794, 0, 0.003816794, 0.183206107, 0, 0.001908397, 0.066793893, 0.003816794]
+    CM[3] = [0.004444444, 0.002222222, 0.731111111, 0, 0.004444444, 0.004444444, 0, 0.182222222, 0, 0.004444444, 0.066666667]
+    CM[4] = [0.018348624, 0.018348624, 0, 0.733944954, 0, 0.018348624, 0.055045872, 0, 0, 0.146788991, 0]
+    CM[5] = [0.019230769, 0, 0.019230769, 0, 0.769230769, 0.019230769, 0, 0.019230769, 0, 0, 0.153846154]
+    CM[6] = [0.006493506, 0.006493506, 0.006493506, 0.006493506, 0.006493506, 0.912337662, 0.019480519, 0.019480519, 0.012987013, 0.003246753, 0]
+    CM[7] = [0.006535948, 0.31372549, 0, 0.019607843, 0, 0.019607843, 0.588235294, 0, 0.003267974, 0.049019608, 0]
+    CM[8] = [0.006968641, 0, 0.285714286, 0, 0.006968641, 0.020905923, 0, 0.6271777, 0, 0, 0.052264808]
+    CM[9] = [0.004914005, 0.002457002, 0, 0, 0, 0.00982801, 0.002457002, 0, 0.98034398, 0, 0]
+    CM[10] = [0.117647059, 0.205882353, 0.011764706, 0.094117647, 0, 0.005882353, 0.088235294, 0, 0, 0.470588235, 0]
+    CM[11] = [0.006944444, 0.013888889, 0.208333333, 0, 0.111111111, 0, 0, 0.104166667, 0, 0, 0.555555556]
+
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => CM[i])
+    end 
     return dd
 end
 
 function pt_rule1_contacts()
     dd = Dict{Symbol, DiscreteUniform}()
     #means = [0, 2, 0, 0, 1, 2, 0, 38]
-    lb = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    hb = [0, 1, 1, 2, 2, 1, 1, 1, 1, 0, 0, 0]
+    lb = [61, 52, 49, 45, 44, 35, 36, 22, 134, 232, 95]
+    hb = [66, 52, 49, 46, 45, 36, 36, 23, 135, 236, 97]
     for i = 1:length(bhpcats)
         push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
     end
@@ -846,14 +860,57 @@ end
 function pt_rule2_contacts()
     dd = Dict{Symbol, DiscreteUniform}()
     #means = [0, 3, 0, 0, 0, 3, 0, 0]
-    lb = [0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0]
-    hb = [0, 1, 1, 2, 2, 1, 1, 1, 1, 1, 0, 0]
+    lb = [3, 5, 6, 6, 6, 6, 3, 3, 0, 10, 4]
+    hb = [6, 5, 6, 7, 7, 6, 4, 4, 1, 12, 5]    
     for i = 1:length(bhpcats)
         push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
     end
     return dd
 end
 
+function pt_rule3_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    #means = [0, 3, 0, 0, 0, 3, 0, 0]
+    lb = [0, 11, 11, 21, 20, 15, 12, 0, 0, 0, 0]
+    hb = [0, 11, 11, 22, 21, 15, 12, 0, 0, 0, 0]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+
+function pt_rule4_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    #means = [0, 3, 0, 0, 0, 3, 0, 0]
+    lb = [6, 3, 3, 3, 3, 2, 4, 4, 7, 18, 7]
+    hb = [7, 3, 3, 3, 3, 2, 4, 4, 7, 19, 8]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+
+function sr_rule1_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    #means = [0, 3, 0, 0, 0, 3, 0, 0]
+    lb = [2, 5, 5, 3, 1, 1, 2, 2, 0, 0, 0]
+    hb = [4, 6, 6, 4, 3, 2, 4, 4, 2, 1, 1]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
+
+function sr_rule2_contacts()
+    dd = Dict{Symbol, DiscreteUniform}()
+    #means = [0, 3, 0, 0, 0, 3, 0, 0]
+    lb = [1, 1, 1, 1, 0, 1, 1, 1, 1, 2, 1]
+    hb = [3, 2, 2, 2, 1, 2, 2, 2, 2, 3, 2]
+    for i = 1:length(bhpcats)
+        push!(dd, bhpcats[i] => DiscreteUniform(lb[i], hb[i]))
+    end
+    return dd
+end
 
 ## internal functions to do intermediate calculations
 function _calc_avgag(lb, hb) 
