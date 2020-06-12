@@ -73,6 +73,8 @@ const ct_data = ct_data_collect()
 export ModelParameters, HEALTH, Human, humans, BETAS
 
 function runsim(simnum, ip::ModelParameters)
+    Random.seed!(simnum*726)
+
     # function runs the `main` function, and collects the data as dataframes. 
     hmatrix = main(ip)            
     # get infectors counters
@@ -97,7 +99,6 @@ end
 export runsim
 
 function main(ip::ModelParameters)
-    #Random.seed!(sim*726)
     ## datacollection            
     # matrix to collect model state for every time step
 
