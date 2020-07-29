@@ -29,9 +29,9 @@ end
     β = 0.0       
     seasonal::Bool = false ## seasonal betas or not
     popsize::Int64 = 10000
-    prov::Symbol = :ontario 
+    prov::Symbol = :newyork 
     calibration::Bool = false 
-    modeltime::Int64 = 500
+    modeltime::Int64 = 300
     initialinf::Int64 = 1
     initialhi::Int64 = 0 ## initial herd immunity, inserts number of REC individuals
     τmild::Int64 = 0 ## days before they self-isolate for mild cases
@@ -47,7 +47,7 @@ end
     ctstrat::Int8 = 0 ## strategy 
     fctcapture::Float16 = 0.0 ## how many symptomatic people identified
     fcontactst::Float16 = 0.0 ## fraction of contacts being isolated/quarantined
-    cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset
+    cidtime::Int8 = 0  ## time to identification (for CT) post symptom onset, NOT USED ANYMORE
     cdaysback::Int8 = 0 ## number of days to go back and collect contacts
     strat3qdays::Int8 = 0
 end
@@ -114,7 +114,7 @@ function main(ip::ModelParameters)
     if p.calibration 
         insert_infected(PRE, p.initialinf, 4)
     else 
-        insert_infected(LAT, p.initialinf, 4)  
+        insert_infected(PRE, p.initialinf, 4)  
         insert_infected(REC, p.initialhi, 4)
     end    
     
@@ -346,28 +346,37 @@ end
 function insert_infected(health, num, ag) 
     ## inserts a number of infected people in the population randomly
     ## this function should resemble move_to_inf()
-    l = findall(x -> x.health == SUS && x.ag == ag, humans)
-    if length(l) > 0 && num < length(l)
-        h = sample(l, num; replace = false)
-        @inbounds for i in h 
-            x = humans[i]
-            if health == PRE 
-                move_to_pre(x) ## the swap may be asymp, mild, or severe, but we can force severe in the time_update function
-            elseif health == LAT 
-                move_to_latent(x)
-                #if the person is moving to latent, let them expire immediately. 
-                #this removes the model artifact of "dipping" at the start of simulations.
-                x.tis = x.exp  
-            elseif health == INF
-                move_to_infsimple(x)
-            elseif health == REC 
-                move_to_recovered(x)
-            else 
-                error("can not insert human of health $(health)")
-            end       
-            x.sickfrom = INF # this will add +1 to the INF count in _count_infectors()... keeps the logic simple in that function.    
-        end
-    end    
+    ## when health == INF, the ag matters. 
+    ## for  health == REC, just use all humans 
+    if health == INF
+        l = findall(x -> x.health == SUS && x.ag == ag, humans)
+    else
+        l = findall(x -> x.health == SUS, humans)
+    end
+    # we can throw an error here because this function is run right at the start
+    length(l) == 0 && error("No susceptibles in the population to change status")
+    num > length(l) && error("No susceptibles in the population to change status")
+
+    h = sample(l, num; replace = false)
+    @inbounds for i in h 
+        x = humans[i]
+        if health == PRE 
+            move_to_pre(x) ## the swap may be asymp, mild, or severe, but we can force severe in the time_update function
+        elseif health == LAT 
+            move_to_latent(x)
+            #if the person is moving to latent, let them expire immediately. 
+            #this removes the model artifact of "dipping" at the start of simulations.
+            x.tis = x.exp  
+        elseif health == INF
+            move_to_infsimple(x)
+        elseif health == REC 
+            move_to_recovered(x)
+        else 
+            error("can not insert human of health $(health)")
+        end       
+        x.sickfrom = INF # this will add +1 to the INF count in _count_infectors()... keeps the logic simple in that function.    
+    end
+        
     return h
 end
 export insert_infected
