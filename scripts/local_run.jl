@@ -103,6 +103,7 @@ function compute_yearly_average(df)
 end
 
 function savestr(p::ModelParameters, custominsert="simresults", customstart="")
+    ## format: /data/covid19abm/$(custominsert)/$(customstart)_$(params)
     datestr = (Dates.format(Dates.now(), dateformat"mmdd_HHMM"))
     ## setup folder name based on model parameters
     taustr = replace(string(p.τmild), "." => "")
@@ -145,18 +146,33 @@ function _calibrate(nsims, myp::ModelParameters)
     return mean(cdr), std(cdr)
 end
 
-function calibrate(beta, nsims, init_inf, size, prov=:ontario)
+function calibrate(beta, nsims=1000, init_inf=1, size=10000, prov=:newyork)
     myp = ModelParameters() # set up default parameters 
     myp.β = beta
     myp.prov = prov
     myp.popsize = size
-    myp.modeltime = 30
+    myp.modeltime = 50
     myp.calibration = true
     myp.initialinf = init_inf
     m, sd = _calibrate(nsims, myp)
     println("mean R0: $(m) with std: $(sd)")
     myp.calibration = false       
     return m
+end
+
+function calibrate_regression()
+    ## runs through a range of beta values and fits a linear regression line 
+    betas = 0.0225:0.0005:0.085
+    ros = similar(betas)
+    for i = 1:length(betas)
+        ros[i] = calibrate(betas[i])
+    end
+    # run regression, myb is a dataframe of ros and betas
+    #linearRegressor = lm(@formula(ros ~ betas), df)  ## formula expression requires dataframe
+    regressed = lm(hcat(ones(length(betas)), betas), ros)
+    return regressed
+    # intercept = -0.00285 + 46.1761(beta) = ro
+    # (ro + 0.00285)/46.1761
 end
 
 function calibrate_robustness(beta, reps, prov=:ontario)
