@@ -20,7 +20,7 @@ Base.@kwdef mutable struct Human
     tracing::Bool = false ## are we tracing contacts for this individual?
     tracestart::Int16 = -1 ## when to start tracing, based on values sampled for x.dur
     traceend::Int16 = -1 ## when to end tracing
-    tracedby::UInt32 = 0 ## is the individual traced? property represents the index of the infectious person 
+    met_contacts::Array{Bool, 1} = [false for _ = 1:10000]
     tracedxp::Int16 = 0 ## the trace is killed after tracedxp amount of days
 end
 
@@ -34,6 +34,8 @@ end
     modeltime::Int64 = 300
     initialinf::Int64 = 1
     initialhi::Int64 = 0 ## initial herd immunity, inserts number of REC individuals
+    asymp_props::NTuple{5, Float64} = (0.25, 0.25, 0.14, 0.07, 0.07) # percentage going to asymp (age-specific)  
+    mild_props::NTuple{5, Float64} = (0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
     τmild::Int64 = 0 ## days before they self-isolate for mild cases
     fmild::Float64 = 0.0  ## percent of people practice self-isolation
     fsevere::Float64 = 0.0 # fixed at 0.80
@@ -105,12 +107,12 @@ function main(ip::ModelParameters)
     # reset the parameters for the simulation scenario
     reset_params(ip)
 
-    p.popsize == 0 && error("no population size given")
     
     hmatrix = zeros(Int16, p.popsize, p.modeltime)
     initialize() # initialize population
+    p.popsize != length(humans[1].met_contacts) && error("forgot to change size of met_contacts property in humans")
+
     # insert initial infected agents into the model
-    # and setup the right swap function. 
     if p.calibration 
         insert_infected(PRE, p.initialinf, 4)
     else 
@@ -157,6 +159,9 @@ function reset_params(ip::ModelParameters)
     # resize and update the BETAS constant array
     init_betas()
 
+    # error checks
+    p.popsize == 0 && error("no population size given")
+    p.ctstrat ∉ (0, 1, 3) && error("invalid ct strategy")
     # resize the human array to change population size
     resize!(humans, p.popsize)
 end
@@ -451,7 +456,7 @@ function move_to_latent(x::Human)
     x.exp = x.dur[1] # get the latent period
     # the swap to asymptomatic is based on age group.
     # ask seyed for the references
-    asymp_pcts = (0.25, 0.25, 0.14, 0.07, 0.07)    
+    asymp_pcts = p.asymp_props 
     x.swap = rand() < asymp_pcts[x.ag] ? ASYMP : PRE 
     ## in calibration mode, latent people never become infectious.
     if p.calibration 
@@ -473,7 +478,7 @@ end
 export move_to_asymp
 
 function move_to_pre(x::Human)
-    θ = (0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
+    θ = p.mild_props #(0.95, 0.9, 0.85, 0.6, 0.2)  # percentage of sick individuals going to mild infection stage
     x.health = PRE
     x.tis = 0   # reset time in state 
     x.exp = x.dur[3] # get the presymptomatic period
@@ -643,32 +648,20 @@ function move_to_recovered(h::Human)
 end
 
 function apply_ct_strategy(y::Human)
-    iso = false  # to collect data at the end of the function
+    
     yhealth = y.health
     if p.ctstrat == 1 
         # in strategy 1, all traced individuals are isolated for 14 days. 
         _set_isolation(y, true, :ct)
-        iso = true
-        y.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
-        ct_data.totalisolated += 1  ## update counter               
-    end
-    if p.ctstrat == 2 ## not really useful
-        if y.health in (PRE, ASYMP, MILD, MISO, INF, IISO)
-            _set_isolation(y, true, :ct)
-            iso = true
-            y.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
-            ct_data.totalisolated += 1  ## update counter
-        else
-            _set_isolation(y, false)
-            # kill the trace
-            y.tracedby = 0 
-            y.tracedxp = 0 
-        end
+        # trace isolation will last for 14 days before expiry                        
+        y.tracedxp = 14 
+        # update total isolated counter               
+        ct_data.totalisolated += 1  
     end
     if p.ctstrat == 3
          # in strategy 3, all traced individuals are isolated for only 4 days. 
          _set_isolation(y, true, :ct)
-         iso = true
+         # trace isolation will last for preset amount of days before expiry                        
          y.tracedxp = p.strat3qdays
          ct_data.totalisolated += 1  ## update counter 
     end
@@ -677,82 +670,112 @@ function apply_ct_strategy(y::Human)
     # but because they still have contacts, they may become sick and the category of the count should change. 
 end
 
+@inline function _kill_trace(x::Human)
+    x.met_contacts .= false
+end
+
 function ct_dynamics(x::Human)
-    # main function for ct dynamics 
-    # turns tracing on if person is infectious and in the right time window
-    # applies isolation to all traced contacts
-    # turns of isolation for susceptibles > 14 days
+    # main function for ct dynamics, runs on a daily basis
+    # if the person is newly latent (i.e. xh == LAT & doi == 0), calculate tracing times in the future
+    # when its time to trace the contacts (i.e. doi == tracingstart), turn tracing property on
+    # however only do it for severe cases. 
+    # now x% of contacts will be traced and stored in memory. 
+    # now eventually the person will be identified (i.e. when doi == tracingend) 
+    # then apply isolation to all traced contacts    
     # order of if statements matter here 
-    (p.ctstrat == 0) && (return)
+
+    (p.ctstrat == 0) && return
     xh = x.health 
     xs = x.swap
     dur = x.dur
     doi = x.doi
     
-    ## person is newly infectious, and will show symptoms. 
-    ## initialize tracestart and traceend times
+    ## person is newly infectious, calculate tracestart and traceend times
+    ## ofcourse asymp is not included, so traceend/start will remain default.
+    ## not possible to know whether person will be mild/severe at this case    
     if xh == LAT && xs != ASYMP && doi == 0 
-        if rand() < p.fctcapture 
-            #delta = latent + presymp + time to identification time
-            delta = dur[1] + dur[3] + Int(round(rand(Gamma(3.2, 1)))) #see chads email for reference
-            q = delta - p.cdaysback  ## how many days to trace prior to identification
-            x.tracestart = max(0, q) # minimum of zero since delta < p.cdaysback
-            x.traceend = delta
-            (x.tracestart > x.traceend) && error("tracestart < traceend")
-            ct_data.total_symp_id += 1 ## update ct data ctr: total number of symptomatic identified
+        #time_to_id = Int(round(rand(Gamma(3.2, 1)))) # sample time to identification post symptom onset
+        # problem with gamma: makes identification time into recover/dead mode. 
+        # sample time to id from their symptomatic period 
+        time_to_id = rand(1:(dur[4])) 
+        #delta = latent + presymp + time to identification time
+        delta = dur[1] + dur[3] + time_to_id #see chads email for reference
+        # so always delta <= dur[1] + dur[3] + dur[4]
+        q = delta - p.cdaysback  ## how many days to trace prior to identification
+        x.tracestart = max(0, q) # minimum of zero since delta < p.cdaysback
+        x.traceend = delta
+        (x.tracestart > x.traceend) && error("tracestart < traceend")
+    end
+
+    ## when the person turns PRE, we know whether they will be in MILD/SEV 
+    ## only want to capture the severe cases
+    if xh == PRE && doi == dur[1] # just entered PRE 
+        ## a few error checks can be done here. 
+        ## check whether tis = 0 since doi == dur[1] should put them in a new state of PRE 
+        ## check whether tracestart/traceend is set. It should be set for all non-asymp. 
+        ## check whether swap == INF/MILD only . 
+
+        ## if swap is not INF, kill the trace  
+        if xs != INF 
+            x.tracing = false 
+            x.tracestart = -1  # minimum of zero since delta < p.cdaysback
+            x.traceend = -1
+            x.met_contacts .= false
         end
     end
 
-    ## turn on trace when day of infection == tracestart    
-    if doi == x.tracestart 
-        x.tracing = true 
-    end 
+    ## turn on tracing in the right time window and only for latent, pre, and severe symptomatic
+    if doi >= x.tracestart && doi < x.traceend
+        x.tracing = true
+    end
+    
+    ## on day of identification, i.e. doi == x.traceend
     if doi == x.traceend 
-        ## have to do more work here
-        x.tracing = false 
-        _set_isolation(x, true, :ct)
-        alltraced = findall(y -> y.tracedby == x.idx, humans)
-        for i in alltraced
-            y = humans[i]
-            yhealth = y.health
-            apply_ct_strategy(y)
+        x.tracing = false            
+        if rand() < p.fctcapture 
+            # update ct data ctr: total number of symptomatic identified
+            ct_data.total_symp_id += 1 
+            # set isolation true of the symptomatic (duh)
+            _set_isolation(x, true, :ct)  
+            # find x's contacts (this gives us the index of the contacts)
+            alltraced = findall(x -> x == true, x.met_contacts)
+            for yidx in alltraced
+                y = humans[yidx]
+                apply_ct_strategy(y)
+            end
         end
     end
 
     if x.tracedxp > 0  # person was traced, isolated, and will be for x days
         x.iso == false && error("a traced person should always be isolated until the trace is killed")
-        # collect stats on the traced individuals         
-        if xh == INF || xh == MILD || xh == PRE
-            ct_data.iso_symp += 1
-        elseif xh == LAT 
-            ct_data.iso_lat += 1
-        elseif xh == ASYMP 
-            ct_data.iso_asymp += 1
-        else        
-            ct_data.iso_sus += 1 
-        end
+        x.tracedxp -= 1 
 
-        x.tracedxp -= 1
+        # collect stats on the traced individuals         
+        # if xh == INF || xh == MILD || xh == PRE
+        #     ct_data.iso_symp += 1
+        # elseif xh == LAT 
+        #     ct_data.iso_lat += 1
+        # elseif xh == ASYMP 
+        #     ct_data.iso_asymp += 1
+        # else        
+        #     ct_data.iso_sus += 1 
+        # end
+        
+        # once the isolation time is over, kill the trace.
         if x.tracedxp == 0 
-            # check whether isolation is turned on/off based on ctstrat
+            # else their trace is killed
+            _set_isolation(x, false)
+            x.isovia = :null # not isolated via contact tracing anymore
+
+            # for ctstrat=3, do a test. 
             if p.ctstrat == 3 
                 rn = rand()
                 # ask seyed for refernece, jeff
                 if (x.health == LAT && rn < 0.05) || (x.health == PRE && rn < 0.95) || (x.health == ASYMP && rn < 0.70) || x.health in (MILD, INF, MISO, IISO)
                     # if strategy 3, only those that are tested positive are furthered isolated for 14 days.
-                    _set_isolation(x, true) ## isovia should already be set to :ct 
-                    x.tracedxp = 14 ## trace isolation will last for 14 days before expiry                
-                    #ct_data.totalisolated += 1  ## update counter  (BUG: double counting)
-                else 
-                    _set_isolation(x, false) ## isovia should already be set to :ct 
-                    x.isovia = :null # not isolated via contact tracing anymore
-                    x.tracedby = 0 # the trace is killed
+                    _set_isolation(x, true, :ct) 
+                    x.tracedxp = 14
                 end
-            else
-                # else their trace is killed
-                _set_isolation(x, false)
-                x.isovia = :null # not isolated via contact tracing anymore
-                x.tracedby = 0 # the trace is killed
             end            
         end
     end
@@ -818,15 +841,10 @@ function dyntrans(sys_time, grps)
                     if ycnt > 0 
                         y.nextday_meetcnt = y.nextday_meetcnt - 1 # remove a contact
                         totalmet += 1
-                        # there is a contact to recieve
-                        # tracing dynamics
-                        
-                        if x.tracing  
-                            if y.tracedby == 0 && rand() < p.fcontactst
-                                y.tracedby = x.idx
-                                ct_data.totaltrace += 1 
-                            end
-                        end
+                                         
+                        if x.tracing && rand() < p.fcontactst 
+                            x.met_contacts[j] = true
+                        end                        
                         
                         # tranmission dynamics
                         if  y.health == SUS && y.swap == UNDEF                  
